@@ -1,0 +1,185 @@
+# Archétypes de profils clients — contexte bancaire canadien
+# Distributions: mean/std pour normale, mean pour lognormale (en $CAD)
+
+archetypes:
+  etudiant:
+    weight: 0.20          # proportion dans la population
+    revenus:
+      distribution: lognormal
+      mean: 1800
+      std: 400
+    montant_moyen:
+      distribution: normal
+      mean: 35
+      std: 15
+    frequence_hebdo:      # transactions/semaine
+      min: 3
+      max: 12
+    horaires_actifs:      # heures actives (24h)
+      jours_semaine: [10, 14, 18, 22, 23]
+      weekend: [11, 13, 15, 19, 21, 23]
+    categories_depenses:
+      epicerie: 0.25
+      restauration: 0.25
+      divertissement: 0.20
+      transport: 0.15
+      abonnements: 0.10
+      autre: 0.05
+    devices:
+      mobile: 0.75
+      desktop: 0.20
+      tablette: 0.05
+    villes_prob:
+      Montreal: 0.30
+      Toronto: 0.25
+      Vancouver: 0.15
+      Quebec: 0.10
+      Ottawa: 0.08
+      Calgary: 0.07
+      autre: 0.05
+
+  jeune_actif:
+    weight: 0.25
+    revenus:
+      distribution: lognormal
+      mean: 4200
+      std: 900
+    montant_moyen:
+      distribution: normal
+      mean: 75
+      std: 30
+    frequence_hebdo:
+      min: 8
+      max: 25
+    horaires_actifs:
+      jours_semaine: [7, 8, 12, 18, 19, 20]
+      weekend: [10, 12, 14, 16, 20, 22]
+    categories_depenses:
+      epicerie: 0.20
+      restauration: 0.20
+      voyage: 0.15
+      divertissement: 0.15
+      vetements: 0.15
+      abonnements: 0.10
+      autre: 0.05
+    devices:
+      mobile: 0.60
+      desktop: 0.35
+      tablette: 0.05
+    villes_prob:
+      Montreal: 0.28
+      Toronto: 0.30
+      Vancouver: 0.18
+      Calgary: 0.10
+      Ottawa: 0.07
+      Quebec: 0.05
+      autre: 0.02
+
+  famille:
+    weight: 0.25
+    revenus:
+      distribution: lognormal
+      mean: 7500
+      std: 2000
+    montant_moyen:
+      distribution: normal
+      mean: 120
+      std: 50
+    frequence_hebdo:
+      min: 10
+      max: 30
+    horaires_actifs:
+      jours_semaine: [8, 9, 12, 17, 18, 19]
+      weekend: [9, 10, 11, 14, 16, 18]
+    categories_depenses:
+      epicerie: 0.35
+      sante: 0.15
+      education: 0.10
+      restauration: 0.10
+      services_maison: 0.15
+      vetements: 0.10
+      autre: 0.05
+    devices:
+      mobile: 0.45
+      desktop: 0.45
+      tablette: 0.10
+    villes_prob:
+      Montreal: 0.22
+      Toronto: 0.28
+      Vancouver: 0.12
+      Calgary: 0.12
+      Ottawa: 0.10
+      Quebec: 0.10
+      autre: 0.06
+
+  retraite:
+    weight: 0.15
+    revenus:
+      distribution: lognormal
+      mean: 3200
+      std: 800
+    montant_moyen:
+      distribution: normal
+      mean: 60
+      std: 25
+    frequence_hebdo:
+      min: 4
+      max: 14
+    horaires_actifs:
+      jours_semaine: [9, 10, 11, 14, 15, 16]
+      weekend: [10, 11, 14, 15]
+    categories_depenses:
+      epicerie: 0.35
+      sante: 0.25
+      restauration: 0.15
+      voyage: 0.10
+      services_maison: 0.10
+      autre: 0.05
+    devices:
+      mobile: 0.25
+      desktop: 0.60
+      tablette: 0.15
+    villes_prob:
+      Montreal: 0.20
+      Toronto: 0.20
+      Vancouver: 0.15
+      Quebec: 0.20
+      Ottawa: 0.10
+      Calgary: 0.08
+      autre: 0.07
+
+  entreprise:
+    weight: 0.15
+    revenus:
+      distribution: lognormal
+      mean: 25000
+      std: 15000
+    montant_moyen:
+      distribution: normal
+      mean: 850
+      std: 400
+    frequence_hebdo:
+      min: 15
+      max: 60
+    horaires_actifs:
+      jours_semaine: [8, 9, 10, 11, 14, 15, 16]
+      weekend: [10, 11]
+    categories_depenses:
+      fournisseurs: 0.30
+      services_pro: 0.25
+      voyage_affaires: 0.15
+      equipement: 0.15
+      restauration: 0.10
+      autre: 0.05
+    devices:
+      mobile: 0.30
+      desktop: 0.65
+      tablette: 0.05
+    villes_prob:
+      Montreal: 0.25
+      Toronto: 0.35
+      Vancouver: 0.15
+      Calgary: 0.12
+      Ottawa: 0.08
+      Quebec: 0.03
+      autre: 0.02
