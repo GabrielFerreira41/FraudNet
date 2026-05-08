@@ -1,0 +1,30 @@
+============================================================
+AGENT BASELINE — RAPPORT D'ÉVALUATION
+============================================================
+  Threshold optimal      : 1.0000
+  AUC-ROC                : 0.9997
+  AUC-PR (avg precision) : 0.6275
+
+Matrice de confusion
+  Vrais négatifs  (TN) : 35,658
+  Faux positifs   (FP) : 19  ← légitimes bloqués à tort
+  Faux négatifs   (FN) : 0  ← fraudes non détectées
+  Vrais positifs  (TP) : 32
+
+              precision    recall  f1-score   support
+
+    Légitime     1.0000    0.9995    0.9997     35677
+      Fraude     0.6275    1.0000    0.7711        32
+
+    accuracy                         0.9995     35709
+   macro avg     0.8137    0.9997    0.8854     35709
+weighted avg     0.9997    0.9995    0.9995     35709
+
+Recall par scénario de fraude
+----------------------------------------
+  carte_volee               100.0%  (11/11)
+  prise_de_compte           100.0%  (1/1)
+  reseau_mules              100.0%  (2/2)
+  test_carte                100.0%  (18/18)
+
+============================================================
