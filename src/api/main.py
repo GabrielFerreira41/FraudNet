@@ -132,6 +132,83 @@ def score_transaction(transaction_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Métriques modèle (pour dashboard desktop)
+# ---------------------------------------------------------------------------
+
+@app.get("/metrics", tags=["Système"])
+def metrics():
+    """
+    Métriques de performance réelles calculées sur le set de test
+    (mars_scores.parquet — dernières 2 semaines).
+    """
+    p = _get()
+    if p.mars_df is None:
+        raise HTTPException(status_code=404, detail="mars_scores.parquet introuvable")
+
+    from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
+
+    df   = p.mars_df
+    y    = df["is_fraud"].astype(int)
+    sc   = df["score_mars"]
+    pred = (sc >= 0.70).astype(int)
+
+    per_scenario: dict = {}
+    if "fraud_type" in df.columns:
+        fraud_df = df[df["is_fraud"]]
+        for ftype, grp in fraud_df.groupby("fraud_type"):
+            detected = (grp["score_mars"] >= 0.40).sum()
+            per_scenario[str(ftype)] = round(float(detected / len(grp)), 3)
+
+    decisions = df["decision_mars"].value_counts().to_dict()
+
+    return {
+        "auc_roc":         round(float(roc_auc_score(y, sc)), 4),
+        "recall":          round(float(recall_score(y, pred)), 4),
+        "precision":       round(float(precision_score(y, pred, zero_division=0)), 4),
+        "f1":              round(float(f1_score(y, pred, zero_division=0)), 4),
+        "n_fraud":         int(y.sum()),
+        "n_total":         len(y),
+        "n_blocked":       int(decisions.get("BLOCK", 0)),
+        "n_investigate":   int(decisions.get("INVESTIGATE", 0)),
+        "n_approved":      int(decisions.get("APPROVE", 0)),
+        "per_scenario":    per_scenario,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin — comptes
+# ---------------------------------------------------------------------------
+
+@app.get("/accounts", tags=["Admin"])
+def list_accounts():
+    """Liste des 1 000 comptes avec niveau de risque et statistiques agrégées."""
+    return _get().account_list()
+
+
+@app.get("/accounts/{account_id}", tags=["Admin"])
+def get_account(account_id: str):
+    """Détail d'un compte : metadata + 20 dernières transactions avec scores MARS."""
+    detail = _get().account_detail(account_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Compte {account_id} introuvable")
+    return detail
+
+
+# ---------------------------------------------------------------------------
+# Graph — réseau de fraude
+# ---------------------------------------------------------------------------
+
+@app.get("/graph/network", tags=["Graph"])
+def graph_network():
+    """
+    Réseau de fraude pour visualisation D3.
+    Nœuds : comptes frauduleux + pairs légitimes + marchands impliqués.
+    Arêtes : transactions frauduleuses et légitimes vers les marchands.
+    """
+    return _get().graph_network()
+
+
+# ---------------------------------------------------------------------------
 # LLM Raisonneur (cold path)
 # ---------------------------------------------------------------------------
 

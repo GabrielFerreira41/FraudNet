@@ -1,7 +1,28 @@
+# Python
 venv/
 __pycache__/
 *.pyc
+*.pyo
 .env
+
+# Données générées (régénérables via les scripts)
 data/generated/
+
+# Modèles entraînés (lourds, régénérables)
+models/
+reports/
+
+# macOS
 .DS_Store
+
+# Jupyter
 *.ipynb_checkpoints
+.ipynb_checkpoints/
+
+# Desktop — build artifacts et dépendances
+desktop/dist/
+desktop/node_modules/
+desktop/out/
+
+# Design sources (fichiers de travail, non distribués)
+Claude_Design/

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 class AgentScores(BaseModel):
     baseline: float
-    sequence: float
+    sequence: float | None   # None si transaction hors cache (live path)
     graph: float
 
 
