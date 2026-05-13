@@ -4,7 +4,7 @@
   "description": "FraudNet — Console Antifraude (app desktop)",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "dev":   "electron-builder --dir && open dist/mac-arm64/FraudNet.app",
     "build": "electron-builder --mac"
   },
   "devDependencies": {
@@ -21,7 +21,8 @@
     "files": [
       "main.js",
       "preload.js",
-      "src/**"
+      "src/**",
+      "src/lib/**"
     ]
   }
 }

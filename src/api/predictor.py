@@ -16,11 +16,12 @@ import pandas as pd
 
 from src.detection.fusion.meta_reasoner import aggregate, decide, THRESHOLD_BLOCK
 
-BASELINE_MODEL_PATH = Path("models/baseline.pkl")
-GRAPH_MODEL_PATH    = Path("models/graph_lgbm.pkl")
-FEATURES_PATH       = Path("data/generated/features.parquet")
-ACCOUNTS_PATH       = Path("data/generated/accounts.parquet")
-MARS_PATH           = Path("reports/mars_scores.parquet")
+BASELINE_MODEL_PATH  = Path("models/baseline.pkl")
+GRAPH_MODEL_PATH     = Path("models/graph_lgbm.pkl")
+FEATURES_PATH        = Path("data/generated/features.parquet")
+ACCOUNTS_PATH        = Path("data/generated/accounts.parquet")
+MARS_PATH            = Path("reports/mars_scores.parquet")
+GNN_SCORES_PATH      = Path("reports/gnn_account_scores.parquet")
 
 
 def _graph_propagation_by_account(features_df: pd.DataFrame) -> dict:
@@ -78,6 +79,17 @@ class FraudPredictor:
         # Comptes + scores MARS (pour le LLM Raisonneur)
         self.accounts_df = pd.read_parquet(ACCOUNTS_PATH)
         self.mars_df = pd.read_parquet(MARS_PATH) if MARS_PATH.exists() else None
+
+        # Scores GNN pré-calculés par compte (évite l'import PyTorch à runtime)
+        self._gnn_scores: dict[str, dict] = {}
+        if GNN_SCORES_PATH.exists():
+            gnn_df = pd.read_parquet(GNN_SCORES_PATH)
+            for _, row in gnn_df.iterrows():
+                self._gnn_scores[str(row["account_id"])] = {
+                    "g1_device":   float(row["score_g1"]),
+                    "g2_merchant": float(row["score_g2"]),
+                    "g3_temporal": float(row["score_g3"]),
+                }
 
         # Cache fast-path : {transaction_id → résultat MARS pré-calculé (3 agents)}
         self._mars_cache: dict[str, dict] = {}
@@ -359,6 +371,124 @@ class FraudPredictor:
             })
 
         return {"nodes": nodes, "edges": edges}
+
+    def _account_context(self, account_id: str) -> dict | None:
+        """Construit le profil contextuel d'un compte pour enrichir l'analyse."""
+        if not account_id:
+            return None
+
+        acc_rows = self.accounts_df[self.accounts_df["account_id"] == account_id]
+        hist     = self.features_df[self.features_df["account_id"] == account_id].copy()
+        if acc_rows.empty or hist.empty:
+            return None
+
+        acc  = acc_rows.iloc[0]
+        hist["timestamp"] = pd.to_datetime(hist["timestamp"])
+        hist  = hist.sort_values("timestamp")
+        last  = hist.iloc[-1]
+
+        top_merchants = (
+            hist.groupby("commercant")["montant"].agg(["count", "mean"])
+            .sort_values("count", ascending=False)
+            .head(5)
+            .reset_index()
+            .rename(columns={"commercant": "nom", "count": "n_tx", "mean": "montant_moyen"})
+        )
+
+        n_fraud = int(hist["is_fraud"].sum())
+
+        return {
+            "prenom":           str(acc.get("prenom", "")),
+            "nom":              str(acc.get("nom", "")),
+            "archetype":        str(acc.get("archetype", "")),
+            "ville":            str(acc.get("ville", "")),
+            "revenu_mensuel":   round(float(acc.get("revenu_mensuel", 0)), 0),
+            "est_vulnerable":   bool(acc.get("est_vulnerabilite", False)),
+            "n_transactions":   len(hist),
+            "n_fraud_connus":   n_fraud,
+            "montant_moyen":    round(float(hist["montant"].mean()), 2),
+            "montant_median":   round(float(hist["montant"].median()), 2),
+            "montant_max":      round(float(hist["montant"].max()), 2),
+            "merchants_habituels": [
+                {
+                    "nom":           str(r["nom"]),
+                    "n_tx":          int(r["n_tx"]),
+                    "montant_moyen": round(float(r["montant_moyen"]), 2),
+                }
+                for _, r in top_merchants.iterrows()
+            ],
+            "derniere_tx": {
+                "timestamp":  str(last["timestamp"]),
+                "montant":    round(float(last["montant"]), 2),
+                "commercant": str(last["commercant"]),
+                "device":     str(last["device"]),
+            },
+        }
+
+    def analyze_live(self, tx: dict) -> dict:
+        """
+        Analyse une transaction inconnue en temps réel.
+        tx : {account_id?, montant, commercant, device, timestamp?}
+        Retourne decision, score_mars, agent_scores, risk_factors, features.
+        """
+        from src.api.live_scorer import compute_live_features, compute_risk_factors
+
+        feat_df   = compute_live_features(tx, self.features_df)
+        feat_dict = feat_df.iloc[0].to_dict()
+
+        # Agent Baseline (LightGBM)
+        s_baseline = float(self._baseline.predict(feat_df[self._baseline_features])[0])
+
+        # Agents GNN — lookup dans le cache pré-calculé
+        account_id = str(tx.get("account_id") or "")
+        gnn = self._gnn_scores.get(account_id, {"g1_device": 0.5, "g2_merchant": 0.5, "g3_temporal": 0.5})
+
+        scores = {
+            "baseline":    s_baseline,
+            "g1_device":   gnn["g1_device"],
+            "g2_merchant": gnn["g2_merchant"],
+            "g3_temporal": gnn["g3_temporal"],
+        }
+        from src.detection.fusion.meta_reasoner import DEFAULT_WEIGHTS, aggregate, decide, THRESHOLD_BLOCK
+        score_f, contradiction, _ = aggregate(scores, DEFAULT_WEIGHTS)
+        decision   = decide(score_f)
+        confidence = float(np.clip(1.0 - abs(score_f - THRESHOLD_BLOCK) / THRESHOLD_BLOCK, 0.0, 1.0))
+
+        risk_factors = compute_risk_factors(feat_dict, gnn)
+
+        return {
+            "decision":       decision,
+            "score_mars":     round(score_f, 4),
+            "confidence":     round(confidence, 4),
+            "contradiction":  contradiction,
+            "agent_scores": {
+                "baseline":    round(s_baseline, 4),
+                "g1_device":   round(gnn["g1_device"], 4),
+                "g2_merchant": round(gnn["g2_merchant"], 4),
+                "g3_temporal": round(gnn["g3_temporal"], 4),
+            },
+            "risk_factors":   risk_factors,
+            "features":       {k: round(v, 4) if isinstance(v, float) else v for k, v in feat_dict.items()},
+            "account_context": self._account_context(account_id),
+        }
+
+    def transaction_details(self, transaction_id: str) -> dict | None:
+        """Retourne les champs bruts d'une transaction pour pré-remplir le formulaire."""
+        idx = self._tx_index.get(transaction_id)
+        if idx is None:
+            return None
+        row = self.features_df.iloc[idx]
+        ft  = row.get("fraud_type")
+        return {
+            "transaction_id": transaction_id,
+            "account_id":     str(row["account_id"]),
+            "montant":        round(float(row["montant"]), 2),
+            "commercant":     str(row["commercant"]),
+            "device":         str(row["device"]),
+            "timestamp":      str(row["timestamp"]),
+            "is_fraud":       bool(row["is_fraud"]),
+            "fraud_type":     str(ft) if pd.notna(ft) and ft else None,
+        }
 
     def has_transaction(self, transaction_id: str) -> bool:
         """Vérifie si un transaction_id est indexé."""

@@ -1,75 +1,60 @@
-// Vue Neo4j — réseau de fraude visualisé avec D3 force-directed graph
-const { useState: useStateG, useEffect: useEffectG, useRef: useRefG, useMemo: useMemoG } = React;
+// GraphView.jsx — Réseau Neo4j · FraudNet
 
-const FRAUD_TYPE_COLOR = {
-  test_carte:      "oklch(0.78 0.16 70)",
-  carte_volee:     "oklch(0.55 0.22 25)",
-  structuration:   "oklch(0.60 0.16 285)",
-  prise_de_compte: "oklch(0.68 0.18 50)",
-  reseau_mules:    "oklch(0.45 0.22 15)",
+const { useState: useStateG, useEffect: useEffectG, useRef: useRefG } = React;
+
+const FRAUD_COLORS = {
+  test_carte:      "#c86020",
+  carte_volee:     "#be1f26",
+  structuration:   "#6b3fa0",
+  prise_de_compte: "#d4760a",
+  reseau_mules:    "#8b1a1a",
 };
-const FRAUD_TYPE_LABEL = {
+const FRAUD_LABELS = {
   test_carte:      "Test de carte",
   carte_volee:     "Carte volée",
   structuration:   "Structuration",
   prise_de_compte: "Prise de compte",
   reseau_mules:    "Réseau de mules",
 };
-const CATEGORIE_COLOR = {
-  electronique: "oklch(0.65 0.14 220)",
-  divertissement: "oklch(0.68 0.14 285)",
-  musique: "oklch(0.70 0.12 200)",
-  mode: "oklch(0.70 0.14 170)",
-  transfert: "oklch(0.60 0.10 240)",
-  autre: "oklch(0.65 0.12 70)",
-};
 
-function buildCypher(fraudType, province) {
-  const whereClause = [
-    "t.isFraud = true",
-    fraudType !== "all" ? `t.fraudType = '${fraudType}'` : null,
-    province !== "all" ? `a.province = '${province}'` : null,
-  ].filter(Boolean).join(" AND ");
-  return `MATCH (a:Account)-[:MADE]->(t:Transaction)-[:AT]->(m:Merchant)\nWHERE ${whereClause}\nRETURN a, t, m LIMIT 100`;
-}
+// ── Legend ──────────────────────────────────────────────────────────────
 
 function Legend() {
   return (
     <div style={{
       position: "absolute", top: 16, left: 16,
-      background: "var(--bg-2)", border: "1px solid var(--line)",
-      borderRadius: 8, padding: "12px 14px", minWidth: 160,
+      background: "var(--card)", border: "1px solid var(--border)",
+      padding: "14px 16px", minWidth: 172,
     }}>
-      <div style={{ fontSize: 9, letterSpacing: 0.8, color: "var(--ink-40)", fontWeight: 700, marginBottom: 10 }}>
-        LÉGENDE
+      <div style={{ fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 10 }}>
+        Légende
       </div>
       {[
-        { shape: "circle", color: "oklch(0.55 0.22 25)", label: "Compte frauduleux" },
-        { shape: "circle", color: "oklch(0.55 0.12 220)", label: "Compte légitime pair" },
-        { shape: "diamond", color: "oklch(0.65 0.14 70)", label: "Marchand impliqué" },
-      ].map(({ shape, color, label }) => (
-        <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-          <svg width={16} height={16}>
+        { shape: "circle",  fill: "#be1f26", stroke: "#e85060", label: "Compte frauduleux" },
+        { shape: "circle",  fill: "#1e3a5f", stroke: "#4878a8", label: "Compte pair" },
+        { shape: "diamond", fill: "#7c5828", stroke: "#b08840", label: "Marchand impliqué" },
+      ].map(({ shape, fill, stroke, label }) => (
+        <div key={label} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
+          <svg width={18} height={18} style={{ flexShrink: 0 }}>
             {shape === "circle"
-              ? <circle cx={8} cy={8} r={6} fill={color} stroke="var(--bg-1)" strokeWidth={1} />
-              : <rect x={3} y={3} width={10} height={10} fill={color} stroke="var(--bg-1)" strokeWidth={1}
-                  transform="rotate(45 8 8)" />
+              ? <circle cx={9} cy={9} r={6} fill={fill} stroke={stroke} strokeWidth={1.5}/>
+              : <rect x={4} y={4} width={10} height={10} fill={fill} stroke={stroke} strokeWidth={1.5} transform="rotate(45 9 9)"/>
             }
           </svg>
-          <span style={{ fontSize: 11, color: "var(--ink-60)" }}>{label}</span>
+          <span style={{ fontSize: 11, color: "var(--ink-2)" }}>{label}</span>
         </div>
       ))}
-      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8, marginTop: 4 }}>
-        <div style={{ fontSize: 9, letterSpacing: 0.8, color: "var(--ink-40)", fontWeight: 700, marginBottom: 7 }}>
-          RELATION
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 2 }}>
+        <div style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 7 }}>
+          Relations
         </div>
         {[
-          { color: "rgba(220,80,60,0.7)", label: "Transaction frauduleuse", thick: true },
-          { color: "rgba(100,150,220,0.35)", label: "Transaction légitime", thick: false },
-        ].map(({ color, label, thick }) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <div style={{ width: 20, height: thick ? 2 : 1, background: color, borderRadius: 1 }} />
-            <span style={{ fontSize: 11, color: "var(--ink-60)" }}>{label}</span>
+          { color: "rgba(190,31,38,.55)", label: "Transaction frauduleuse", h: 2 },
+          { color: "rgba(30,58,95,.2)",   label: "Transaction légitime",    h: 1 },
+        ].map(({ color, label, h }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 6 }}>
+            <div style={{ width: 20, height: h, background: color, flexShrink: 0 }}/>
+            <span style={{ fontSize: 11, color: "var(--ink-2)" }}>{label}</span>
           </div>
         ))}
       </div>
@@ -77,63 +62,63 @@ function Legend() {
   );
 }
 
-function NodeDetail({ node, onClose }) {
-  if (!node) return null;
-  const isAccount  = node.type === "account";
-  const isFraud    = isAccount && node.fraud;
-  const mainColor  = isFraud ? "var(--alert)" : isAccount ? "var(--accent-blue)" : "var(--warn)";
+// ── Node detail panel ────────────────────────────────────────────────────
 
+function NodePanel({ node, onClose }) {
+  if (!node) return null;
+  const isAcc  = node.type === "account";
+  const accent = isAcc ? (node.fraud ? "#be1f26" : "#1e3a5f") : "#7c5828";
   return (
     <div style={{
-      position: "absolute", bottom: 16, right: 16, width: 260,
-      background: "var(--bg-2)", border: "1px solid var(--line)",
-      borderRadius: 10, overflow: "hidden",
+      position: "absolute", bottom: 16, right: 16, width: 252,
+      background: "var(--card)", border: "1px solid var(--border)", overflow: "hidden",
     }}>
       <div style={{
-        padding: "10px 14px 8px",
-        borderBottom: "1px solid var(--line)",
-        background: `color-mix(in oklch, ${mainColor} 8%, var(--bg-2))`,
+        padding: "10px 14px",
+        borderBottom: "1px solid var(--border)",
+        background: accent + "10",
         display: "flex", justifyContent: "space-between", alignItems: "flex-start",
       }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: mainColor, letterSpacing: 0.3 }}>
-            {isAccount ? (isFraud ? "COMPTE FRAUDULEUX" : "COMPTE LÉGITIME") : "MARCHAND"}
+          <div style={{ fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 600, color: accent }}>
+            {isAcc ? (node.fraud ? "Compte frauduleux" : "Compte pair") : "Marchand"}
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-90)", marginTop: 2 }}>
-            {isAccount ? node.full_name : node.label}
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
+            {isAcc ? node.full_name : node.label}
           </div>
         </div>
-        <button onClick={onClose} style={{
-          background: "transparent", border: "none", color: "var(--ink-40)",
-          cursor: "pointer", fontSize: 16, padding: 0, lineHeight: 1,
-        }}>×</button>
+        <button onClick={onClose} style={{ fontSize: 18, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
       </div>
-      <div style={{ padding: "10px 14px 12px" }}>
-        {isAccount ? (
+      <div style={{ padding: "12px 14px 14px" }}>
+        {isAcc ? (
           <>
-            <Row label="Archétype"  value={node.archetype?.replace("_", " ")} />
-            <Row label="Province"   value={node.province} />
-            <Row label="Transactions" value={node.n_tx?.toLocaleString("fr-CA")} mono />
-            {isFraud && node.fraud_types?.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 9, letterSpacing: 0.7, color: "var(--ink-40)", fontWeight: 700, marginBottom: 5 }}>
-                  TYPES DE FRAUDE
+            <PRow label="Archétype"    value={node.archetype} />
+            <PRow label="Province"     value={node.province} />
+            <PRow label="Transactions" value={node.n_tx?.toLocaleString("fr-CA")} mono />
+            {node.fraud && node.fraud_types?.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 6 }}>
+                  Types de fraude
                 </div>
-                {node.fraud_types.map(ft => (
-                  <div key={ft} style={{
-                    display: "inline-block", marginRight: 4, marginBottom: 4,
-                    fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 4,
-                    background: `color-mix(in oklch, ${FRAUD_TYPE_COLOR[ft] || "var(--alert)"} 14%, var(--bg-2))`,
-                    color: FRAUD_TYPE_COLOR[ft] || "var(--alert)",
-                  }}>{FRAUD_TYPE_LABEL[ft] || ft}</div>
-                ))}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {node.fraud_types.map(ft => (
+                    <span key={ft} style={{
+                      fontSize: 9, fontWeight: 600, padding: "3px 7px",
+                      background: (FRAUD_COLORS[ft] || "#be1f26") + "18",
+                      color: FRAUD_COLORS[ft] || "#be1f26",
+                      border: `1px solid ${(FRAUD_COLORS[ft] || "#be1f26")}40`,
+                    }}>
+                      {FRAUD_LABELS[ft] || ft}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </>
         ) : (
           <>
-            <Row label="Catégorie"    value={node.categorie} />
-            <Row label="Transactions fraude" value={node.n_fraud_tx} mono color="var(--alert)" />
+            <PRow label="Catégorie"       value={node.categorie} />
+            <PRow label="Tx frauduleuses" value={node.n_fraud_tx} mono />
           </>
         )}
       </div>
@@ -141,49 +126,46 @@ function NodeDetail({ node, onClose }) {
   );
 }
 
-function Row({ label, value, mono, color }) {
+function PRow({ label, value, mono }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-      <span style={{ fontSize: 11, color: "var(--ink-40)" }}>{label}</span>
-      <span className={mono ? "mono" : ""} style={{ fontSize: 11, fontWeight: 500, color: color || "var(--ink-70)" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+      <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", fontFamily: mono ? "var(--mono)" : "inherit" }}>
         {value ?? "—"}
       </span>
     </div>
   );
 }
 
+// ── Main component ────────────────────────────────────────────────────────
+
 function GraphView() {
-  const svgRef                  = useRefG(null);
-  const [graphData, setGraphData] = useStateG(null);
-  const [loading, setLoading]   = useStateG(true);
-  const [fraudType, setFraudType] = useStateG("all");
-  const [province, setProvince] = useStateG("all");
-  const [showPeers, setShowPeers] = useStateG(true);
+  const svgRef = useRefG(null);
+  const [graphData, setGraphData]       = useStateG(null);
+  const [loading, setLoading]           = useStateG(true);
+  const [error, setError]               = useStateG(false);
+  const [fraudType, setFraudType]       = useStateG("all");
+  const [province, setProvince]         = useStateG("all");
+  const [showPeers, setShowPeers]       = useStateG(true);
   const [selectedNode, setSelectedNode] = useStateG(null);
-  const [nodeCount, setNodeCount] = useStateG(0);
-  const [edgeCount, setEdgeCount] = useStateG(0);
+  const [counts, setCounts]             = useStateG({ nodes: 0, edges: 0 });
 
   useEffectG(() => {
-    if (window.FraudNetAPI) {
-      window.FraudNetAPI.graphNetwork().then(data => {
-        if (data) setGraphData(data);
-        setLoading(false);
-      });
-    } else {
-      setLoading(false);
-    }
+    fetch("http://localhost:8000/graph/network", { signal: AbortSignal.timeout(30000) })
+      .then(r => r.json())
+      .then(data => { setGraphData(data); setLoading(false); })
+      .catch(() => { setError(true); setLoading(false); });
   }, []);
 
   useEffectG(() => {
     if (!graphData || !svgRef.current || typeof d3 === "undefined") return;
 
-    // Filter nodes
     const nodes = graphData.nodes.filter(n => {
       if (!showPeers && n.type === "account" && !n.fraud) return false;
       if (province !== "all" && n.type === "account" && n.province !== province) return false;
-      if (fraudType !== "all" && n.type === "account" && n.fraud && !n.fraud_types.includes(fraudType)) return false;
+      if (fraudType !== "all" && n.type === "account" && n.fraud && !n.fraud_types?.includes(fraudType)) return false;
       return true;
-    }).map(n => ({ ...n })); // deep copy for D3 mutation
+    }).map(n => ({ ...n }));
 
     const nodeIds = new Set(nodes.map(n => n.id));
     const edges = graphData.edges
@@ -191,51 +173,35 @@ function GraphView() {
       .filter(e => fraudType === "all" || !e.fraud || e.fraud_type === fraudType)
       .map(e => ({ ...e }));
 
-    setNodeCount(nodes.length);
-    setEdgeCount(edges.length);
+    setCounts({ nodes: nodes.length, edges: edges.length });
 
-    const svg     = d3.select(svgRef.current);
-    const width   = svgRef.current.clientWidth  || 900;
-    const height  = svgRef.current.clientHeight || 600;
-
+    const svg    = d3.select(svgRef.current);
+    const width  = svgRef.current.clientWidth  || 900;
+    const height = svgRef.current.clientHeight || 580;
     svg.selectAll("*").remove();
 
-    const container = svg.append("g");
+    const g = svg.append("g");
+    svg.call(d3.zoom().scaleExtent([0.15, 5]).on("zoom", ev => g.attr("transform", ev.transform)));
 
-    svg.call(
-      d3.zoom().scaleExtent([0.2, 4])
-        .on("zoom", event => container.attr("transform", event.transform))
-    );
+    const sim = d3.forceSimulation(nodes)
+      .force("link",    d3.forceLink(edges).id(d => d.id).distance(90).strength(0.4))
+      .force("charge",  d3.forceManyBody().strength(-280))
+      .force("center",  d3.forceCenter(width / 2, height / 2))
+      .force("collide", d3.forceCollide().radius(d => d.type === "merchant" ? 26 : 20));
 
-    const simulation = d3.forceSimulation(nodes)
-      .force("link",      d3.forceLink(edges).id(d => d.id).distance(90).strength(0.4))
-      .force("charge",    d3.forceManyBody().strength(-280))
-      .force("center",    d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(d => d.type === "merchant" ? 28 : 22));
+    const link = g.append("g").selectAll("line")
+      .data(edges).join("line")
+      .attr("stroke",         d => d.fraud ? (FRAUD_COLORS[d.fraud_type] || "#be1f26") : "rgba(30,58,95,.18)")
+      .attr("stroke-width",   d => d.fraud ? 1.8 : 0.8)
+      .attr("stroke-opacity", d => d.fraud ? 0.6 : 1);
 
-    // Edges
-    const link = container.append("g")
-      .selectAll("line")
-      .data(edges)
-      .join("line")
-      .attr("stroke", d => {
-        if (!d.fraud) return "rgba(100,150,220,0.25)";
-        return FRAUD_TYPE_COLOR[d.fraud_type] ?? "rgba(220,80,60,0.55)";
-      })
-      .attr("stroke-width", d => d.fraud ? 1.8 : 0.8)
-      .attr("stroke-opacity", d => d.fraud ? 0.65 : 0.35);
-
-    // Node groups
-    const node = container.append("g")
-      .selectAll("g")
-      .data(nodes)
-      .join("g")
+    const node = g.append("g").selectAll("g")
+      .data(nodes).join("g")
       .style("cursor", "pointer")
-      .call(
-        d3.drag()
-          .on("start", (ev, d) => { if (!ev.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-          .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
-          .on("end",   (ev, d) => { if (!ev.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+      .call(d3.drag()
+        .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+        .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
       )
       .on("click", (ev, d) => { ev.stopPropagation(); setSelectedNode(d); });
 
@@ -244,140 +210,123 @@ function GraphView() {
     // Account circles
     node.filter(d => d.type === "account")
       .append("circle")
-      .attr("r", d => Math.max(9, Math.min(20, d.n_tx / 25)))
-      .attr("fill", d => d.fraud ? "oklch(0.48 0.22 25)" : "oklch(0.45 0.12 220)")
-      .attr("stroke", d => d.fraud ? "oklch(0.68 0.22 25)" : "oklch(0.65 0.12 220)")
-      .attr("stroke-width", d => d.fraud ? 2 : 1.2);
+      .attr("r", d => Math.max(8, Math.min(18, (d.n_tx || 100) / 30)))
+      .attr("fill",         d => d.fraud ? "#be1f26" : "#1e3a5f")
+      .attr("stroke",       d => d.fraud ? "#e85060" : "#4878a8")
+      .attr("stroke-width", 1.5);
 
     // Pulse ring on fraud nodes
     node.filter(d => d.type === "account" && d.fraud)
       .append("circle")
-      .attr("r", d => Math.max(9, Math.min(20, d.n_tx / 25)) + 5)
+      .attr("r", d => Math.max(8, Math.min(18, (d.n_tx || 100) / 30)) + 5)
       .attr("fill", "none")
-      .attr("stroke", "oklch(0.68 0.22 25)")
+      .attr("stroke", "#be1f26")
       .attr("stroke-width", 1)
-      .attr("stroke-opacity", 0.3);
+      .attr("stroke-opacity", 0.22);
 
     // Merchant diamonds
     node.filter(d => d.type === "merchant")
       .append("rect")
-      .attr("x", -13).attr("y", -13).attr("width", 26).attr("height", 26)
+      .attr("x", -11).attr("y", -11).attr("width", 22).attr("height", 22)
       .attr("transform", "rotate(45)")
-      .attr("fill", d => CATEGORIE_COLOR[d.categorie] ?? "oklch(0.65 0.14 70)")
-      .attr("stroke", "oklch(0.78 0.14 70)")
-      .attr("stroke-width", 1.5)
-      .attr("rx", 2);
+      .attr("fill",         "#7c5828")
+      .attr("stroke",       "#b08840")
+      .attr("stroke-width", 1.5);
 
     // Labels
     node.append("text")
-      .attr("dy", d => d.type === "merchant" ? 24 : d.fraud ? -18 : -15)
+      .attr("dy", d => d.type === "merchant" ? 22 : d.fraud ? -16 : -14)
       .attr("text-anchor", "middle")
-      .style("font-size", "10px")
-      .style("fill", "var(--ink-60)")
+      .style("font-size", "9.5px")
+      .style("fill", "var(--ink-2)")
       .style("font-family", "Inter, sans-serif")
       .style("pointer-events", "none")
-      .text(d => d.label.length > 14 ? d.label.slice(0, 13) + "…" : d.label);
+      .text(d => d.label.length > 13 ? d.label.slice(0, 12) + "…" : d.label);
 
-    simulation.on("tick", () => {
-      link
-        .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
-        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    sim.on("tick", () => {
+      link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
       node.attr("transform", d => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
 
-    return () => simulation.stop();
+    return () => sim.stop();
   }, [graphData, fraudType, province, showPeers]);
 
-  const selectStyle = {
-    background: "var(--bg-3)", border: "1px solid var(--line)", color: "var(--ink-70)",
-    borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer", outline: "none",
+  const selStyle = {
+    background: "var(--card)", border: "1px solid var(--border)",
+    color: "var(--navy)", padding: "6px 10px", fontSize: 12,
+    fontFamily: "var(--font)", cursor: "pointer", outline: "none",
   };
 
-  const cypherText = buildCypher(fraudType, province);
-
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--bg-1)" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
 
-      {/* Sub-header controls */}
+      {/* Filter bar */}
       <div style={{
-        padding: "10px 22px", borderBottom: "1px solid var(--line)",
-        background: "var(--bg-2)", display: "flex", alignItems: "center", gap: 12,
+        background: "var(--card)", borderBottom: "1px solid var(--border)",
+        padding: "9px 24px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0,
       }}>
-        <div style={{
-          flex: 1, fontFamily: "var(--mono)", fontSize: 11,
-          color: "var(--accent-teal)", background: "var(--bg-3)",
-          borderRadius: 6, padding: "6px 12px",
-          border: "1px solid var(--line)", whiteSpace: "pre", overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}>{cypherText.replace("\n", "  ")}</div>
-
-        <select value={fraudType} onChange={e => setFraudType(e.target.value)} style={selectStyle}>
+        <div className="section-label" style={{ marginBottom: 0 }}>
+          <span>Réseau de fraude · Neo4j</span>
+        </div>
+        <div style={{ flex: 1 }}/>
+        <select value={fraudType} onChange={e => setFraudType(e.target.value)} style={selStyle}>
           <option value="all">Tous les types</option>
-          {Object.entries(FRAUD_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(FRAUD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select value={province} onChange={e => setProvince(e.target.value)} style={selectStyle}>
+        <select value={province} onChange={e => setProvince(e.target.value)} style={selStyle}>
           <option value="all">Toutes provinces</option>
           {["ON","QC","BC","AB"].map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
-          <input
-            type="checkbox" checked={showPeers} onChange={e => setShowPeers(e.target.checked)}
-            style={{ accentColor: "var(--accent-teal)", width: 14, height: 14 }}
-          />
-          <span style={{ fontSize: 12, color: "var(--ink-60)" }}>Comptes pairs</span>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none", fontSize: 12, color: "var(--ink-2)" }}>
+          <input type="checkbox" checked={showPeers} onChange={e => setShowPeers(e.target.checked)}/>
+          Comptes pairs
         </label>
       </div>
 
-      {/* Graph canvas */}
-      <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-        {loading ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
-            height: "100%", color: "var(--ink-40)", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 32, opacity: 0.3 }}>◌</div>
-            Chargement du réseau…
+      {/* Canvas */}
+      <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#edeae3" }}>
+
+        {loading && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 10, color: "var(--ink-3)" }}>
+            <div style={{ fontSize: 28, opacity: 0.3 }}>◌</div>
+            <span style={{ fontSize: 12 }}>Chargement du réseau…</span>
           </div>
-        ) : !graphData ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
-            height: "100%", color: "var(--ink-40)", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 32, opacity: 0.3 }}>⊘</div>
-            <div>API non disponible</div>
-            <div style={{ fontSize: 12 }}>Lance <code style={{ fontFamily: "var(--mono)", color: "var(--accent-teal)" }}>uvicorn src.api.main:app --port 8000</code></div>
+        )}
+        {!loading && error && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 8, color: "var(--ink-3)" }}>
+            <div style={{ fontSize: 28, opacity: 0.3 }}>⊘</div>
+            <div style={{ fontSize: 13, color: "var(--navy)", fontWeight: 600 }}>API non disponible</div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--mono)", marginTop: 4 }}>
+              uvicorn src.api.main:app --port 8000
+            </div>
           </div>
-        ) : (
-          <svg
-            ref={svgRef}
-            style={{ width: "100%", height: "100%", display: "block" }}
-          />
+        )}
+        {!loading && !error && (
+          <svg ref={svgRef} style={{ width: "100%", height: "100%", display: "block" }}/>
         )}
 
-        {graphData && !loading && <Legend />}
+        {graphData && !loading && <Legend/>}
+        {selectedNode && <NodePanel node={selectedNode} onClose={() => setSelectedNode(null)}/>}
 
-        {selectedNode && (
-          <NodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
-        )}
-
-        {/* Bottom status bar */}
         {graphData && !loading && (
           <div style={{
-            position: "absolute", bottom: 16, left: "50%",
-            transform: "translateX(-50%)",
-            background: "var(--bg-2)", border: "1px solid var(--line)",
-            borderRadius: 20, padding: "4px 16px",
-            display: "flex", gap: 14, alignItems: "center",
+            position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
+            background: "var(--card)", border: "1px solid var(--border)",
+            padding: "5px 18px", display: "flex", gap: 16, alignItems: "center",
           }}>
-            <span style={{ fontSize: 11, color: "var(--ink-50)" }}>
-              <span className="mono" style={{ fontWeight: 700, color: "var(--ink-80)" }}>{nodeCount}</span> nœuds
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <strong style={{ fontFamily: "var(--mono)", color: "var(--navy)" }}>{counts.nodes}</strong> nœuds
             </span>
-            <span style={{ width: 1, height: 12, background: "var(--line)" }} />
-            <span style={{ fontSize: 11, color: "var(--ink-50)" }}>
-              <span className="mono" style={{ fontWeight: 700, color: "var(--ink-80)" }}>{edgeCount}</span> relations
+            <span style={{ width: 1, height: 10, background: "var(--border)" }}/>
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <strong style={{ fontFamily: "var(--mono)", color: "var(--navy)" }}>{counts.edges}</strong> relations
             </span>
-            <span style={{ width: 1, height: 12, background: "var(--line)" }} />
-            <span style={{ fontSize: 10, color: "var(--ink-40)", letterSpacing: 0.5 }}>
-              Déplacer · Scroll pour zoomer
-            </span>
+            <span style={{ width: 1, height: 10, background: "var(--border)" }}/>
+            <span style={{ fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.05em" }}>Drag · Scroll pour zoomer</span>
           </div>
         )}
+
       </div>
     </div>
   );

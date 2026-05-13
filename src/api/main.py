@@ -16,7 +16,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.schemas import (
-    AgentScores, HealthResponse, SampleResponse,
+    AgentScores, AnalyzeAgentScores, AnalyzeRequest, AnalyzeResponse,
+    HealthResponse, NarrativeResponse, SampleResponse,
     ScoringResponse, StatsResponse,
 )
 from src.api.predictor import FraudPredictor
@@ -54,7 +55,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -89,6 +90,15 @@ def stats():
 # ---------------------------------------------------------------------------
 # Données
 # ---------------------------------------------------------------------------
+
+@app.get("/transactions/{transaction_id}/details", tags=["Données"])
+def transaction_details(transaction_id: str):
+    """Retourne les champs bruts d'une transaction (pour pré-remplir le formulaire live)."""
+    detail = _get().transaction_details(transaction_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} introuvable")
+    return detail
+
 
 @app.get("/transactions/sample", response_model=SampleResponse, tags=["Données"])
 def sample_transactions(n: int = Query(default=5, ge=1, le=20)):
@@ -185,6 +195,16 @@ def list_accounts():
     return _get().account_list()
 
 
+@app.get("/accounts/lookup", tags=["Admin"])
+def accounts_lookup():
+    """Liste simplifiée des comptes pour le formulaire d'analyse live."""
+    p = _get()
+    return [
+        {"account_id": a["account_id"], "label": f"{a['prenom']} {a['nom']} — {a['archetype']}"}
+        for a in p.account_list()
+    ]
+
+
 @app.get("/accounts/{account_id}", tags=["Admin"])
 def get_account(account_id: str):
     """Détail d'un compte : metadata + 20 dernières transactions avec scores MARS."""
@@ -206,6 +226,54 @@ def graph_network():
     Arêtes : transactions frauduleuses et légitimes vers les marchands.
     """
     return _get().graph_network()
+
+
+# ---------------------------------------------------------------------------
+# Analyse live — transaction inconnue
+# ---------------------------------------------------------------------------
+
+@app.post("/analyze", response_model=AnalyzeResponse, tags=["Scoring"])
+def analyze_transaction(req: AnalyzeRequest):
+    """
+    Analyse une transaction saisie manuellement via le pipeline MARS.
+
+    - Calcule les features comportementales depuis l'historique du compte
+    - Score Baseline LightGBM (live)
+    - Scores GNN G1/G2/G3 depuis le cache pré-calculé par compte
+    - Agrégation + décision MARS
+    """
+    p   = _get()
+    res = p.analyze_live(req.model_dump())
+    return AnalyzeResponse(
+        decision         = res["decision"],
+        score_mars       = res["score_mars"],
+        confidence       = res["confidence"],
+        contradiction    = res["contradiction"],
+        agent_scores     = AnalyzeAgentScores(**res["agent_scores"]),
+        risk_factors     = res["risk_factors"],
+        features         = res["features"],
+        account_context  = res.get("account_context"),
+    )
+
+
+@app.post("/analyze/narrative", response_model=NarrativeResponse, tags=["LLM"])
+def analyze_narrative(req: AnalyzeRequest):
+    """
+    Génère une analyse narrative de la transaction via Claude API.
+
+    Nécessite `ANTHROPIC_API_KEY` dans `.env`.
+    Fallback automatique vers une analyse basée sur des règles si la clé est absente.
+    """
+    p   = _get()
+    res = p.analyze_live(req.model_dump())
+
+    from src.detection.llm_reasoner.narrator import narrate
+    report = narrate(
+        tx_input     = req.model_dump(),
+        mars_result  = res,
+        accounts_df  = p.accounts_df,
+    )
+    return NarrativeResponse(**report)
 
 
 # ---------------------------------------------------------------------------

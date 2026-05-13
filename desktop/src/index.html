@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8"/>
-<title>FraudNet — Console Antifraude</title>
+<title>FraudNet</title>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -12,130 +12,102 @@
 <body>
 <div id="root"></div>
 
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js" crossorigin="anonymous"></script>
+<script src="lib/react.development.js"></script>
+<script src="lib/react-dom.development.js"></script>
+<script src="lib/babel.min.js"></script>
+<script src="lib/d3.min.js"></script>
 
-<script src="data.js"></script>
-<script src="api-bridge.js"></script>
-<script type="text/babel" src="LiveOps.jsx"></script>
-<script type="text/babel" src="ModelStats.jsx"></script>
-<script type="text/babel" src="AdminView.jsx"></script>
+<script type="text/babel" src="PitchView.jsx"></script>
+<script type="text/babel" src="Dashboard.jsx"></script>
 <script type="text/babel" src="GraphView.jsx"></script>
+
+<script type="text/babel" src="LiveOps.jsx"></script>
+<!-- Future views (uncomment when ready):
+<script type="text/babel" src="ModelStats.jsx"></script>
+-->
 
 <script type="text/babel">
 const { useState, useEffect } = React;
 
-function ApiStatusPill() {
-  const [status, setStatus] = useState("checking"); // checking | ok | offline
+const VIEWS = [
+  { id: "pitch",     label: "Vue Projet",   ready: true  },
+  { id: "dashboard", label: "Vue Données",  ready: true  },
+  { id: "graph",     label: "Réseau Neo4j", ready: true  },
+  { id: "live",      label: "MARS Analyzer", ready: true  },
+  { id: "model",     label: "Performance",  ready: false },
+];
 
+function ApiPill() {
+  const [ok, setOk] = useState(null);
   useEffect(() => {
     const check = async () => {
-      const h = await window.FraudNetAPI.health();
-      setStatus(h ? "ok" : "offline");
+      try {
+        const r = await fetch("http://localhost:8000/health", {
+          signal: AbortSignal.timeout(3000),
+        });
+        setOk(r.ok);
+      } catch { setOk(false); }
     };
     check();
     const id = setInterval(check, 15000);
     return () => clearInterval(id);
   }, []);
-
-  const cfg = {
-    checking: { color: "var(--ink-50)", dot: "var(--ink-40)", label: "API..." },
-    ok:       { color: "var(--ok)",     dot: "var(--ok)",     label: "API connectée" },
-    offline:  { color: "var(--warn)",   dot: "var(--warn)",   label: "API hors ligne" },
-  }[status];
-
+  const dot   = ok === null ? "rgba(255,255,255,.3)" : ok ? "#4ade80" : "#f87171";
+  const label = ok === null ? "API…" : ok ? "API connectée" : "API hors ligne";
   return (
-    <div className="health-pill">
-      <span style={{width:6, height:6, borderRadius:"50%", background:cfg.dot,
-        boxShadow: status==="ok" ? `0 0 0 3px color-mix(in oklch, ${cfg.dot} 25%, transparent)` : "none"}}/>
-      <span className="mono" style={{color: cfg.color}}>{cfg.label}</span>
+    <div className="status-pill">
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, display: "inline-block" }}/>
+      <span>{label}</span>
     </div>
   );
 }
 
-function TopBar({ view, setView, accounts, transactions }) {
-  const flagged = accounts.filter(a => a.flagged).length;
-  const blocked = transactions.filter(t => t.action === "blocked").length;
+function TopBar({ view, setView }) {
   return (
     <div className="topbar">
       <div className="logo">
         <div className="logo-mark">F</div>
-        <span>FraudNet</span>
+        <span className="logo-name">FraudNet</span>
         <span className="logo-sub">· CONSOLE ANTIFRAUDE</span>
       </div>
+      <div className="topbar-spacer"/>
       <div className="nav-tabs">
-        <button className="nav-tab" data-active={view==="live"} onClick={()=>setView("live")}>
-          Live Ops
-        </button>
-        <button className="nav-tab" data-active={view==="model"} onClick={()=>setView("model")}>
-          Performance modèle
-        </button>
-        <button className="nav-tab" data-active={view==="admin"} onClick={()=>setView("admin")}>
-          Administration
-        </button>
-        <button className="nav-tab" data-active={view==="graph"} onClick={()=>setView("graph")}>
-          Réseau Neo4j
-        </button>
+        {VIEWS.map(v => (
+          <button
+            key={v.id}
+            className="nav-tab"
+            data-active={String(view === v.id)}
+            disabled={!v.ready}
+            onClick={() => v.ready && setView(v.id)}
+            title={v.ready ? "" : "En construction"}
+          >
+            {v.label}
+          </button>
+        ))}
       </div>
-      <div className="topbar-right">
-        <ApiStatusPill/>
-        <div className="health-pill">
-          <span className="mono" style={{color:"var(--alert)"}}>⊘ {blocked}</span>
-          <span style={{color:"var(--ink-40)"}}>bloqués</span>
-        </div>
-        <div className="health-pill">
-          <span className="mono" style={{color:"var(--warn)"}}>⚑ {flagged}</span>
-          <span style={{color:"var(--ink-40)"}}>flagués</span>
-        </div>
-        <div style={{display:"flex", alignItems:"center", gap:8, paddingLeft:6}}>
-          <div style={{width:26, height:26, borderRadius:"50%", background:"var(--bg-3)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:600}}>GF</div>
-        </div>
-      </div>
+      <ApiPill/>
     </div>
   );
 }
 
 function App() {
-  const [view, setView]               = useState("live");
-  const [accounts, setAccounts]       = useState(() => window.FraudNet.generateAccounts(24));
-  const [transactions, setTransactions] = useState([]);
-  const [paused, setPaused]           = useState(false);
-  const [speed, setSpeed]             = useState(1.2);
-  const [historical]                  = useState(() => window.FraudNet.generateHistoricalMetrics());
-
-  useEffect(() => {
-    const saved = localStorage.getItem("fraudnet_view");
-    if (saved) setView(saved);
-  }, []);
-  useEffect(() => { localStorage.setItem("fraudnet_view", view); }, [view]);
-
+  const [view, setView] = useState("pitch");
+  const isFixed = view === "graph" || view === "live";
   return (
-    <div style={{height:"100vh", display:"flex", flexDirection:"column"}}>
-      <TopBar view={view} setView={setView} accounts={accounts} transactions={transactions}/>
-      <div style={{flex:1, minHeight:0}}>
-        {view === "live" ? (
-          <LiveOps
-            accounts={accounts} setAccounts={setAccounts}
-            transactions={transactions} setTransactions={setTransactions}
-            paused={paused} setPaused={setPaused}
-            speed={speed} setSpeed={setSpeed}
-          />
-        ) : view === "model" ? (
-          <ModelStats historical={historical} transactions={transactions}/>
-        ) : view === "admin" ? (
-          <AdminView/>
-        ) : (
-          <GraphView/>
-        )}
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      <TopBar view={view} setView={setView}/>
+      <div style={{ flex: 1, minHeight: 0, overflowY: isFixed ? "hidden" : "auto" }}>
+        {view === "pitch"     && <PitchView/>}
+        {view === "dashboard" && <Dashboard/>}
+        {view === "graph"     && <GraphView/>}
+        {view === "live"      && <LiveOps/>}
       </div>
     </div>
   );
 }
 
 function mount() {
-  if (!window.LiveOps || !window.ModelStats || !window.AdminView || !window.GraphView) {
+  if (!window.PitchView || !window.Dashboard || !window.GraphView || !window.LiveOps) {
     setTimeout(mount, 30); return;
   }
   ReactDOM.createRoot(document.getElementById("root")).render(<App/>);

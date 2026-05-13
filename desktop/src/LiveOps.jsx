@@ -1,127 +1,365 @@
-// Live Ops view: accounts list + live transaction feed + detail drawer
-const { useState, useEffect, useRef, useMemo } = React;
+const { useState: useStateL, useEffect: useEffectL, useRef: useRefL } = React;
 
-function Avatar({ initials, profile, size = 36 }) {
-  const bgMap = {
-    student: "var(--accent-teal)",
-    young_pro: "var(--accent-amber)",
-    family: "var(--accent-mint)",
-    retiree: "var(--accent-lilac)",
-    business: "var(--accent-rose)"
-  };
+const API = "http://localhost:8000";
+
+const MERCHANTS = [
+  "Amazon Prime","App Store","Apple Store","ATM Desjardins","AWS","Air Canada",
+  "Air Transat","Bell","Best Buy","Booking.com","Bureau en Gros","Canadian Tire",
+  "Cineplex","Clinique locale","Costco","Dell","Dépanneur local","Epic Games",
+  "Expedia","Google Cloud","H&M","Home Depot","IGA","IKEA","Jean Coutu",
+  "Loblaws","Maxi","McDonald's","Metro","Netflix","Pharmaprix","Pizza Pizza",
+  "Provigo","Rogers","Rona","Simons","Sport Chek","Spotify","St-Hubert",
+  "Subway","Super C","Telus","Tim Hortons","Uber","VIA Rail","Videotron",
+  "Virement e-Transfer","Winners","Zara",
+];
+
+const DECISION_STYLE = {
+  BLOCK:       { bg: "#fef2f2", border: "#fca5a5", color: "#be1f26", label: "BLOQUÉ" },
+  INVESTIGATE: { bg: "#fffbeb", border: "#fcd34d", color: "#92400e", label: "À EXAMINER" },
+  APPROVE:     { bg: "#f0fdf4", border: "#86efac", color: "#166534", label: "APPROUVÉ" },
+};
+
+const AGENT_LABELS = {
+  baseline:    { name: "Baseline",    sub: "LightGBM comportemental",   icon: "◈" },
+  g1_device:   { name: "G1 Device",   sub: "GraphSAGE — réseau devices", icon: "◎" },
+  g2_merchant: { name: "G2 Merchant", sub: "GAT bipartite — marchands",  icon: "◉" },
+  g3_temporal: { name: "G3 Temporal", sub: "GCN — vélocité temporelle",  icon: "◐" },
+};
+
+function ScoreGauge({ value }) {
+  const pct   = Math.round(value * 100);
+  const color = pct >= 70 ? "#be1f26" : pct >= 40 ? "#d97706" : "#16a34a";
   return (
-    <div style={{
-      width: size, height: size, borderRadius: 8,
-      background: `color-mix(in oklch, ${bgMap[profile] || "var(--ink-60)"} 24%, var(--bg-2))`,
-      color: `color-mix(in oklch, ${bgMap[profile] || "var(--ink-60)"} 90%, white)`,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontWeight: 600, fontSize: size * 0.38, letterSpacing: 0.3,
-      border: `1px solid color-mix(in oklch, ${bgMap[profile] || "var(--ink-60)"} 35%, transparent)`
-    }}>{initials}</div>
-  );
-}
-
-function StatusDot({ status }) {
-  const c = { approved: "var(--ok)", review: "var(--warn)", blocked: "var(--alert)" }[status];
-  return <span style={{
-    display:"inline-block", width:8, height:8, borderRadius:"50%",
-    background:c, boxShadow:`0 0 0 3px color-mix(in oklch, ${c} 20%, transparent)`
-  }}/>;
-}
-
-function ScoreBar({ score }) {
-  const color = score >= 70 ? "var(--alert)" : score >= 45 ? "var(--warn)" : "var(--ok)";
-  return (
-    <div style={{display:"flex",alignItems:"center",gap:8,minWidth:110}}>
-      <div style={{flex:1, height:4, background:"var(--bg-3)", borderRadius:2, overflow:"hidden"}}>
-        <div style={{width:`${score}%`, height:"100%", background:color, transition:"width .4s"}}/>
-      </div>
-      <span className="mono" style={{fontSize:12, color, fontWeight:600, minWidth:24, textAlign:"right"}}>{score}</span>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+      <svg width={120} height={66} viewBox="0 0 120 66">
+        <path d="M10,60 A50,50 0 0,1 110,60" fill="none" stroke="#e4ddd3" strokeWidth={10} strokeLinecap="round"/>
+        <path
+          d="M10,60 A50,50 0 0,1 110,60"
+          fill="none" stroke={color} strokeWidth={10} strokeLinecap="round"
+          strokeDasharray={`${pct * 1.571} 157.1`}
+        />
+        <text x={60} y={58} textAnchor="middle" fontSize={22} fontWeight={700}
+          fontFamily="'JetBrains Mono',monospace" fill={color}>{pct}</text>
+        <text x={60} y={64} textAnchor="middle" fontSize={8} fill="#8596af">/ 100</text>
+      </svg>
     </div>
   );
 }
 
-function AccountRow({ account, selected, onClick, pulse }) {
+function AgentBar({ id, score }) {
+  const pct   = Math.round(score * 100);
+  const color = pct >= 70 ? "#be1f26" : pct >= 40 ? "#d97706" : "#16a34a";
+  const info  = AGENT_LABELS[id] || { name: id, sub: "", icon: "·" };
   return (
-    <button onClick={onClick} className="account-row" data-selected={selected} data-pulse={pulse}>
-      <Avatar initials={account.initials} profile={account.profile} />
-      <div style={{flex:1, minWidth:0, textAlign:"left"}}>
-        <div style={{display:"flex", justifyContent:"space-between", gap:8, alignItems:"baseline"}}>
-          <span style={{fontWeight:500, fontSize:13, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{account.name}</span>
-          <span className="mono" style={{fontSize:11, color:"var(--ink-40)"}}>{account.id}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ fontSize: 16, color: "#8596af", width: 18, textAlign: "center" }}>{info.icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#0c1b34" }}>{info.name}</span>
+          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12, fontWeight: 700, color }}>{pct}%</span>
         </div>
-        <div style={{display:"flex", gap:8, marginTop:3, fontSize:11, color:"var(--ink-50)", alignItems:"center"}}>
-          <span>{account.profileLabel}</span>
-          <span style={{opacity:0.4}}>·</span>
-          <span>{account.city}</span>
-          <span style={{opacity:0.4}}>·</span>
-          <span className="mono">${account.balance.toLocaleString("fr-CA")}</span>
+        <div style={{ fontSize: 10, color: "#8596af", marginBottom: 4 }}>{info.sub}</div>
+        <div style={{ height: 4, background: "#e4ddd3", borderRadius: 2, overflow: "hidden" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2, transition: "width .6s ease" }}/>
         </div>
       </div>
-      <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3}}>
-        <ScoreBar score={account.riskScore}/>
-        {account.blockedCount > 0 && (
-          <span style={{fontSize:10, color:"var(--alert)", fontWeight:600, letterSpacing:0.4}}>
-            {account.blockedCount} BLOQUÉ{account.blockedCount>1?"S":""}
-          </span>
-        )}
-      </div>
-    </button>
+    </div>
   );
 }
 
-function TransactionCard({ txn, onClick, isNew }) {
-  const statusLabel = { approved: "APPROUVÉ", review: "À EXAMINER", blocked: "BLOQUÉ" }[txn.action];
-  const icon = {
-    groceries:"🛒", coffee:"☕", gas:"⛽", online:"🌐", restaurants:"🍽️",
-    transit:"🚇", utilities:"💡", transfers:"↗", suspicious:"⚠"
-  }[txn.category] || "•";
+function RiskTag({ label }) {
   return (
-    <div className={`txn-card ${isNew?"txn-card-new":""}`} data-action={txn.action} onClick={onClick}>
-      <div style={{display:"flex", alignItems:"center", gap:12, padding:"10px 14px"}}>
-        <div style={{
-          width:34, height:34, borderRadius:8, display:"flex", alignItems:"center",
-          justifyContent:"center", fontSize:16,
-          background:"var(--bg-3)", border:"1px solid var(--line)"
-        }}>{icon}</div>
-        <div style={{flex:1, minWidth:0}}>
-          <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:10}}>
-            <span style={{fontWeight:500, fontSize:13, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-              {txn.merchant}
-            </span>
-            <span className="mono" style={{fontSize:14, fontWeight:600, color: txn.action==="blocked"?"var(--alert)":"var(--ink-90)"}}>
-              {txn.action==="blocked" && <span style={{opacity:0.5, marginRight:3}}>⊘</span>}
-              ${txn.amount.toLocaleString("fr-CA",{minimumFractionDigits:2,maximumFractionDigits:2})}
-            </span>
+    <span style={{
+      fontSize: 11, padding: "3px 8px", borderRadius: 4, fontWeight: 500,
+      background: "rgba(190,31,38,.08)", color: "#be1f26",
+      border: "1px solid rgba(190,31,38,.2)"
+    }}>{label}</span>
+  );
+}
+
+function NarrativePanel({ narrative, loading, error }) {
+  if (loading) return (
+    <div style={{ padding: "18px 0", textAlign: "center", color: "#8596af", fontSize: 13 }}>
+      <span style={{ marginRight: 8 }}>◐</span>Claude analyse la transaction…
+    </div>
+  );
+  if (error) return (
+    <div style={{ padding: 12, background: "#fef2f2", borderRadius: 6, fontSize: 12, color: "#be1f26" }}>
+      {error}
+    </div>
+  );
+  if (!narrative) return null;
+
+  const verdictColor = narrative.verdict === "FRAUD" ? "#be1f26" : narrative.verdict === "SUSPICIOUS" ? "#d97706" : "#16a34a";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <span style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.8, padding: "3px 10px",
+          borderRadius: 4, background: `${verdictColor}18`, color: verdictColor,
+          border: `1px solid ${verdictColor}40`
+        }}>{narrative.verdict}</span>
+        {narrative.fraud_type_suspected && (
+          <span style={{ fontSize: 11, color: "#8596af", fontStyle: "italic" }}>
+            — {narrative.fraud_type_suspected.replace(/_/g, " ")}
+          </span>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#8596af" }}>
+          source : {narrative.source === "mistral" ? "Mistral AI" : "règles"}
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: "#3d4e6a" }}>
+        {narrative.justification}
+      </p>
+      {narrative.risk_factors?.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {narrative.risk_factors.map((f, i) => <RiskTag key={i} label={f}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultPanel({ result, onNarrative, narrativeState }) {
+  if (!result) return (
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", gap: 16, padding: 40, color: "#8596af"
+    }}>
+      <div style={{ fontSize: 40, opacity: 0.3 }}>◈</div>
+      <p style={{ margin: 0, fontSize: 13, textAlign: "center", maxWidth: 260 }}>
+        Saisissez les détails d'un virement et cliquez sur <strong>Analyser</strong> pour voir
+        l'analyse MARS complète.
+      </p>
+    </div>
+  );
+
+  const ds  = DECISION_STYLE[result.decision] || DECISION_STYLE.APPROVE;
+  const pct = Math.round(result.score_mars * 100);
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 24 }}>
+
+      {/* Decision banner */}
+      <div style={{
+        padding: "18px 24px", borderRadius: 10,
+        background: ds.bg, border: `1.5px solid ${ds.border}`,
+        display: "flex", alignItems: "center", gap: 20
+      }}>
+        <ScoreGauge value={result.score_mars}/>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: ds.color, letterSpacing: 1 }}>
+            {ds.label}
           </div>
-          <div style={{display:"flex", justifyContent:"space-between", marginTop:3, fontSize:11, color:"var(--ink-50)", gap:10}}>
-            <span style={{overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-              <span className="mono">{txn.account}</span>
-              <span style={{opacity:0.5, margin:"0 6px"}}>·</span>
-              <span>{txn.city}</span>
-            </span>
-            <span style={{display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap"}}>
-              <StatusDot status={txn.action}/>
-              <span style={{
-                fontSize:10, fontWeight:600, letterSpacing:0.5,
-                color: txn.action==="blocked" ? "var(--alert)" : txn.action==="review" ? "var(--warn)" : "var(--ok)"
-              }}>{statusLabel}</span>
-              <span className="mono" style={{color:"var(--ink-40)", minWidth:28, textAlign:"right"}}>{txn.score}</span>
-            </span>
+          <div style={{ fontSize: 12, color: "#3d4e6a", marginTop: 4 }}>
+            Score MARS · {pct}% de probabilité de fraude
+          </div>
+          <div style={{ fontSize: 11, color: "#8596af", marginTop: 2 }}>
+            Confiance : {Math.round(result.confidence * 100)}%
+            {result.contradiction && (
+              <span style={{ marginLeft: 10, color: "#d97706", fontWeight: 600 }}>
+                ⚠ Contradiction entre agents
+              </span>
+            )}
           </div>
         </div>
       </div>
-      {txn.action !== "approved" && txn.riskFactors.length > 0 && (
+
+      {/* Account context */}
+      {result.account_context && (
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: "#8596af", fontWeight: 600, marginBottom: 14 }}>
+            PROFIL DU COMPTE
+          </div>
+          <AccountContext ctx={result.account_context} txMontant={result.features?.montant}/>
+        </div>
+      )}
+
+      {/* Agent scores */}
+      <div>
+        <div style={{ fontSize: 10, letterSpacing: 0.8, color: "#8596af", fontWeight: 600, marginBottom: 14 }}>
+          SCORES PAR AGENT
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {Object.entries(result.agent_scores).map(([k, v]) => (
+            <AgentBar key={k} id={k} score={v}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Risk factors */}
+      {result.risk_factors.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: "#8596af", fontWeight: 600, marginBottom: 10 }}>
+            FACTEURS DE RISQUE
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {result.risk_factors.map((f, i) => <RiskTag key={i} label={f}/>)}
+          </div>
+        </div>
+      )}
+
+      {/* Narrative */}
+      <div style={{ borderTop: "1px solid #e4ddd3", paddingTop: 20 }}>
         <div style={{
-          padding:"6px 14px 10px", display:"flex", flexWrap:"wrap", gap:5,
-          borderTop:"1px dashed var(--line)"
+          display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14
         }}>
-          {txn.riskFactors.slice(0,3).map((rf,i)=>(
-            <span key={i} style={{
-              fontSize:10, padding:"2px 7px", borderRadius:3,
-              background:"color-mix(in oklch, var(--alert) 12%, transparent)",
-              color:"var(--alert)", fontWeight:500
-            }}>{rf}</span>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: "#8596af", fontWeight: 600 }}>
+            ANALYSE NARRATIVE
+          </div>
+          {!narrativeState.data && (
+            <button
+              onClick={onNarrative}
+              disabled={narrativeState.loading}
+              style={{
+                fontSize: 11, fontWeight: 600, padding: "5px 14px", borderRadius: 5,
+                background: narrativeState.loading ? "#e4ddd3" : "#0c1b34",
+                color: narrativeState.loading ? "#8596af" : "#fff",
+                border: "none", cursor: narrativeState.loading ? "default" : "pointer",
+              }}
+            >
+              {narrativeState.loading ? "En cours…" : "Générer avec Mistral"}
+            </button>
+          )}
+        </div>
+        <NarrativePanel
+          narrative={narrativeState.data}
+          loading={narrativeState.loading}
+          error={narrativeState.error}
+        />
+      </div>
+
+      {/* Raw features toggle */}
+      <RawFeatures features={result.features}/>
+    </div>
+  );
+}
+
+function AccountContext({ ctx, txMontant }) {
+  if (!ctx) return null;
+  const archLabels = {
+    jeune_actif: "Jeune actif", etudiant: "Étudiant", famille: "Famille",
+    retraite: "Retraité", professionnel: "Professionnel", voyageur: "Voyageur", entrepreneur: "Entrepreneur",
+  };
+  const ratio = txMontant && ctx.montant_moyen ? (txMontant / ctx.montant_moyen) : null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Identité */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: 10, background: "#0c1b34",
+          color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 16, fontWeight: 700, flexShrink: 0,
+        }}>
+          {ctx.prenom?.[0]}{ctx.nom?.[0]}
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: "#0c1b34" }}>{ctx.prenom} {ctx.nom}</div>
+          <div style={{ fontSize: 11, color: "#8596af", marginTop: 2 }}>
+            {archLabels[ctx.archetype] || ctx.archetype} · {ctx.ville}
+            {ctx.est_vulnerable && <span style={{ marginLeft: 8, color: "#d97706", fontWeight: 600 }}>⚠ Profil vulnérable</span>}
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto", textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: "#8596af" }}>Revenu mensuel</div>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 600, fontSize: 13 }}>
+            {ctx.revenu_mensuel.toLocaleString("fr-CA")} $
+          </div>
+        </div>
+      </div>
+
+      {/* Stats achats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+        {[
+          { label: "Montant moyen", val: `${ctx.montant_moyen} $`, highlight: ratio && ratio > 3 },
+          { label: "Montant médian", val: `${ctx.montant_median} $` },
+          { label: "Achat max",      val: `${ctx.montant_max} $` },
+          { label: "Nb transactions", val: ctx.n_transactions },
+          { label: "Fraudes connues", val: ctx.n_fraud_connus, alert: ctx.n_fraud_connus > 0 },
+          { label: "Ratio tx actuelle", val: ratio ? `${ratio.toFixed(1)}×` : "—", alert: ratio && ratio > 3 },
+        ].map((s, i) => (
+          <div key={i} style={{
+            background: s.alert ? "rgba(190,31,38,.06)" : "#f7f4ee",
+            border: `1px solid ${s.alert ? "rgba(190,31,38,.2)" : "#e4ddd3"}`,
+            borderRadius: 6, padding: "8px 10px",
+          }}>
+            <div style={{ fontSize: 10, color: "#8596af", marginBottom: 3 }}>{s.label}</div>
+            <div style={{
+              fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700,
+              color: s.alert ? "#be1f26" : "#0c1b34",
+            }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Marchands habituels */}
+      <div>
+        <div style={{ fontSize: 10, color: "#8596af", letterSpacing: 0.6, fontWeight: 600, marginBottom: 8 }}>
+          MARCHANDS HABITUELS
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {ctx.merchants_habituels.map((m, i) => {
+            const barW = Math.round((m.n_tx / ctx.merchants_habituels[0].n_tx) * 100);
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, width: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0c1b34" }}>{m.nom}</span>
+                <div style={{ flex: 1, height: 4, background: "#e4ddd3", borderRadius: 2 }}>
+                  <div style={{ width: `${barW}%`, height: "100%", background: "#0c1b34", borderRadius: 2 }}/>
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 11, color: "#8596af", width: 52, textAlign: "right" }}>
+                  {m.n_tx} tx · {m.montant_moyen}$
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Dernière transaction */}
+      <div style={{ background: "#f7f4ee", borderRadius: 6, padding: "10px 12px", fontSize: 12 }}>
+        <span style={{ color: "#8596af", fontWeight: 600, fontSize: 10, letterSpacing: 0.6 }}>DERNIÈRE TRANSACTION · </span>
+        <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#3d4e6a" }}>
+          {ctx.derniere_tx.montant} $ chez {ctx.derniere_tx.commercant}
+          <span style={{ color: "#8596af" }}> · {ctx.derniere_tx.device} · {new Date(ctx.derniere_tx.timestamp).toLocaleDateString("fr-CA")}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RawFeatures({ features }) {
+  const [open, setOpen] = useStateL(false);
+  const highlight = ["ratio_montant", "velocite_1h", "nouveau_commercant", "nouveau_device",
+                     "est_rafale", "heure_inhabituelle", "n_comptes_par_device"];
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          fontSize: 11, color: "#8596af", background: "none", border: "1px solid #e4ddd3",
+          borderRadius: 4, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit"
+        }}
+      >
+        {open ? "▴ Masquer les features" : "▾ Voir les features calculées"}
+      </button>
+      {open && (
+        <div style={{
+          marginTop: 10, background: "#f7f4ee", borderRadius: 6, padding: 14,
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 20px"
+        }}>
+          {Object.entries(features).map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span style={{
+                fontSize: 11, color: highlight.includes(k) ? "#0c1b34" : "#8596af",
+                fontWeight: highlight.includes(k) ? 600 : 400
+              }}>{k}</span>
+              <span style={{
+                fontFamily: "'JetBrains Mono',monospace", fontSize: 11,
+                color: highlight.includes(k) ? "#be1f26" : "#3d4e6a"
+              }}>
+                {typeof v === "number" ? v.toFixed(typeof v === "number" && v % 1 === 0 ? 0 : 3) : String(v)}
+              </span>
+            </div>
           ))}
         </div>
       )}
@@ -129,350 +367,244 @@ function TransactionCard({ txn, onClick, isNew }) {
   );
 }
 
-function Sparkline({ data, height=32, color="var(--accent-teal)" }) {
-  if (!data.length) return null;
-  const max = Math.max(...data, 1);
-  const w = 120, step = w / Math.max(1, data.length - 1);
-  const pts = data.map((v,i) => `${i*step},${height - (v/max)*height}`).join(" ");
-  return (
-    <svg width={w} height={height} style={{overflow:"visible"}}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round"/>
-      <polyline points={`0,${height} ${pts} ${w},${height}`} fill={`color-mix(in oklch, ${color} 15%, transparent)`} stroke="none"/>
-    </svg>
-  );
-}
+function LiveOps() {
+  const [accounts, setAccounts]       = useStateL([]);
+  const [form, setForm]               = useStateL({
+    account_id: "", montant: "", commercant: "Amazon Prime", device: "mobile", timestamp: "",
+  });
+  const [loading, setLoading]         = useStateL(false);
+  const [result, setResult]           = useStateL(null);
+  const [error, setError]             = useStateL(null);
+  const [narrative, setNarrative]     = useStateL({ data: null, loading: false, error: null });
+  const lastTxRef                     = useRefL(null);
 
-function AccountDetail({ account, recentTxns, onClose }) {
-  if (!account) return null;
-  const accountTxns = recentTxns.filter(t => t.accountId === account.id).slice(0, 40);
-  const blocked = accountTxns.filter(t => t.action === "blocked");
-  const riskTrend = useMemo(() => {
-    // fake trend
-    const arr = [];
-    let v = account.riskScore;
-    for (let i=0;i<24;i++) { v = Math.max(0, Math.min(100, v + (Math.random()-0.5)*6)); arr.push(Math.round(v)); }
-    return arr;
-  }, [account.id]);
+  // Load account list
+  useEffectL(() => {
+    fetch(`${API}/accounts/lookup`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        setAccounts(data);
+        if (data.length) setForm(f => ({ ...f, account_id: data[0].account_id }));
+      })
+      .catch(() => {});
+  }, []);
 
-  return (
-    <div className="drawer">
-      <div style={{padding:"18px 20px 16px", borderBottom:"1px solid var(--line)"}}>
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
-          <div style={{display:"flex", gap:14}}>
-            <Avatar initials={account.initials} profile={account.profile} size={48}/>
-            <div>
-              <div style={{fontSize:18, fontWeight:600}}>{account.name}</div>
-              <div className="mono" style={{fontSize:12, color:"var(--ink-40)", marginTop:2}}>{account.id}</div>
-              <div style={{display:"flex", gap:10, marginTop:6, fontSize:12, color:"var(--ink-60)"}}>
-                <span>{account.profileIcon} {account.profileLabel}</span>
-                <span>📍 {account.city}</span>
-                <span>Ouvert {account.openedDate}</span>
-              </div>
-            </div>
-          </div>
-          <button onClick={onClose} className="btn-ghost">✕</button>
-        </div>
-        <div style={{display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:12, marginTop:16}}>
-          <div className="stat-card">
-            <div className="stat-label">Solde</div>
-            <div className="stat-value mono">${account.balance.toLocaleString("fr-CA")}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Txn / 7j</div>
-            <div className="stat-value mono">{account.txnCount7d}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Score risque</div>
-            <div className="stat-value mono" style={{color: account.riskScore>=45?"var(--warn)":"var(--ok)"}}>{account.riskScore}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Bloqués</div>
-            <div className="stat-value mono" style={{color: account.blockedCount>0?"var(--alert)":"var(--ink-60)"}}>{account.blockedCount}</div>
-          </div>
-        </div>
-      </div>
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-      <div style={{padding:"16px 20px", borderBottom:"1px solid var(--line)"}}>
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8}}>
-          <div style={{fontSize:11, letterSpacing:0.6, color:"var(--ink-50)", fontWeight:600}}>SCORE DE RISQUE · 24H</div>
-          <span className="mono" style={{fontSize:11, color:"var(--ink-40)"}}>now: {account.riskScore}</span>
-        </div>
-        <Sparkline data={riskTrend} height={44} color={account.riskScore>=45?"var(--warn)":"var(--accent-teal)"}/>
-      </div>
+  const handleAnalyze = async () => {
+    if (!form.montant || !form.commercant) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setNarrative({ data: null, loading: false, error: null });
 
-      <div style={{padding:"14px 20px 10px"}}>
-        <div style={{fontSize:11, letterSpacing:0.6, color:"var(--ink-50)", fontWeight:600, marginBottom:10}}>
-          TRANSACTIONS RÉCENTES · {accountTxns.length}
-        </div>
-      </div>
-      <div style={{padding:"0 14px 20px", display:"flex", flexDirection:"column", gap:6, overflowY:"auto", flex:1}}>
-        {accountTxns.length === 0 && (
-          <div style={{padding:30, textAlign:"center", color:"var(--ink-40)", fontSize:12}}>
-            Aucune transaction encore — attendez le prochain tick…
-          </div>
-        )}
-        {accountTxns.map(t => <TransactionCard key={t.id} txn={t}/>)}
-      </div>
-    </div>
-  );
-}
-
-function TransactionDetail({ txn, account, onClose }) {
-  if (!txn) return null;
-  const scenarioLabel = txn.fraudType ? window.FraudNet.FRAUD_SCENARIOS.find(s=>s.key===txn.fraudType)?.label : null;
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"18px 22px", borderBottom:"1px solid var(--line)", display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
-          <div>
-            <div style={{fontSize:11, letterSpacing:0.6, color:"var(--ink-50)", fontWeight:600}}>TRANSACTION</div>
-            <div className="mono" style={{fontSize:16, marginTop:4}}>{txn.id}</div>
-          </div>
-          <button className="btn-ghost" onClick={onClose}>✕</button>
-        </div>
-        <div style={{padding:"20px 22px"}}>
-          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18}}>
-            <div>
-              <div style={{fontSize:22, fontWeight:600}}>{txn.merchant}</div>
-              <div style={{fontSize:13, color:"var(--ink-60)", marginTop:3}}>{account?.name} · {txn.city}</div>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div className="mono" style={{fontSize:26, fontWeight:600, color: txn.action==="blocked"?"var(--alert)":"var(--ink-90)"}}>
-                ${txn.amount.toLocaleString("fr-CA",{minimumFractionDigits:2,maximumFractionDigits:2})}
-              </div>
-              <div style={{display:"inline-flex", alignItems:"center", gap:6, marginTop:4, fontSize:11, fontWeight:600, letterSpacing:0.5,
-                color: txn.action==="blocked" ? "var(--alert)" : txn.action==="review" ? "var(--warn)" : "var(--ok)"}}>
-                <StatusDot status={txn.action}/>
-                {{approved:"APPROUVÉ", review:"À EXAMINER", blocked:"BLOQUÉ"}[txn.action]}
-              </div>
-            </div>
-          </div>
-
-          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:20}}>
-            <div>
-              <div className="detail-label">Score du modèle</div>
-              <ScoreBar score={txn.score}/>
-            </div>
-            <div>
-              <div className="detail-label">Scénario détecté</div>
-              <div style={{fontSize:13}}>{scenarioLabel || <span style={{color:"var(--ink-40)"}}>—</span>}</div>
-            </div>
-            <div>
-              <div className="detail-label">Horodatage</div>
-              <div className="mono" style={{fontSize:12}}>{new Date(txn.timestamp).toLocaleString("fr-CA")}</div>
-            </div>
-            <div>
-              <div className="detail-label">Device</div>
-              <div className="mono" style={{fontSize:12, color: txn.device.includes("unknown")||txn.device.includes("new")?"var(--alert)":"var(--ink-80)"}}>
-                {txn.device}
-              </div>
-            </div>
-          </div>
-
-          {txn.riskFactors.length > 0 && (
-            <div style={{marginTop:20}}>
-              <div className="detail-label">Facteurs de risque</div>
-              <div style={{display:"flex", flexWrap:"wrap", gap:6}}>
-                {txn.riskFactors.map((rf,i)=>(
-                  <span key={i} style={{
-                    fontSize:12, padding:"5px 10px", borderRadius:4,
-                    background:"color-mix(in oklch, var(--alert) 12%, transparent)",
-                    color:"var(--alert)", fontWeight:500,
-                    border:"1px solid color-mix(in oklch, var(--alert) 25%, transparent)"
-                  }}>{rf}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{marginTop:22, padding:14, background:"var(--bg-2)", borderRadius:6, border:"1px solid var(--line)"}}>
-            <div className="detail-label">Explication modèle (SHAP-like)</div>
-            <div style={{display:"flex", flexDirection:"column", gap:4, marginTop:6}}>
-              {(txn.riskFactors.length ? txn.riskFactors : ["Montant normal","Commerçant habituel","Device connu"]).slice(0,4).map((f,i)=>{
-                const contrib = txn.action==="approved" ? -(5+Math.random()*15) : (6+Math.random()*22);
-                return (
-                  <div key={i} style={{display:"flex", alignItems:"center", gap:10, fontSize:12}}>
-                    <span style={{flex:1}}>{f}</span>
-                    <div style={{flex:1, display:"flex", justifyContent:"center", position:"relative", height:14}}>
-                      <div style={{position:"absolute", left:"50%", top:0, bottom:0, width:1, background:"var(--line)"}}/>
-                      <div style={{
-                        position:"absolute", left: contrib>0 ? "50%" : `calc(50% + ${contrib/0.4}%)`,
-                        top:3, height:8, width: Math.abs(contrib/0.4)+"%",
-                        background: contrib>0 ? "var(--alert)" : "var(--ok)",
-                        borderRadius:2
-                      }}/>
-                    </div>
-                    <span className="mono" style={{width:44, textAlign:"right", fontSize:11, color: contrib>0?"var(--alert)":"var(--ok)"}}>
-                      {contrib>0?"+":""}{contrib.toFixed(1)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LiveOps({ accounts, setAccounts, transactions, setTransactions, paused, setPaused, speed, setSpeed }) {
-  const [selectedAccountId, setSelectedAccountId] = useState(null);
-  const [selectedTxn, setSelectedTxn] = useState(null);
-  const [filter, setFilter] = useState("all"); // all | blocked | review | approved
-  const [profileFilter, setProfileFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [pulseAccount, setPulseAccount] = useState(null);
-  const feedRef = useRef(null);
-
-  // Live ticker
-  useEffect(() => {
-    if (paused) return;
-    const interval = setInterval(() => {
-      const account = accounts[Math.floor(Math.random() * accounts.length)];
-      const txn = window.FraudNet.generateTransaction(account, Date.now());
-      const score = window.FraudNet.scoreTransaction(txn, account);
-      const action = window.FraudNet.decideAction(score);
-      const enriched = { ...txn, score, action };
-
-      setTransactions(prev => [enriched, ...prev].slice(0, 200));
-
-      // update account state
-      setAccounts(prev => prev.map(a => {
-        if (a.id !== account.id) {
-          // gently decay
-          return { ...a, riskScore: Math.max(0, Math.round(a.riskScore - 0.2)) };
-        }
-        const newRisk = Math.max(0, Math.min(100, a.riskScore * 0.85 + score * 0.35));
-        return {
-          ...a,
-          riskScore: Math.round(newRisk),
-          blockedCount: a.blockedCount + (action==="blocked" ? 1 : 0),
-          savedAmount: a.savedAmount + (action==="blocked" ? txn.amount : 0),
-          flagged: action !== "approved"
-        };
-      }));
-
-      if (action !== "approved") {
-        setPulseAccount(account.id);
-        setTimeout(()=>setPulseAccount(null), 900);
-      }
-    }, Math.max(200, 1800 / speed));
-    return () => clearInterval(interval);
-  }, [paused, speed, accounts]);
-
-  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
-
-  const filteredAccounts = accounts
-    .filter(a => profileFilter === "all" || a.profile === profileFilter)
-    .filter(a => !search || a.name.toLowerCase().includes(search.toLowerCase()) || a.id.toLowerCase().includes(search.toLowerCase()))
-    .sort((a,b) => b.riskScore - a.riskScore);
-
-  const filteredTxns = transactions.filter(t => filter === "all" || t.action === filter);
-
-  // live stats strip
-  const stats = useMemo(() => {
-    const last100 = transactions.slice(0, 100);
-    return {
-      total: transactions.length,
-      blocked: transactions.filter(t=>t.action==="blocked").length,
-      review: transactions.filter(t=>t.action==="review").length,
-      saved: transactions.filter(t=>t.action==="blocked").reduce((s,t)=>s+t.amount, 0),
-      rate: last100.length ? Math.round(last100.filter(t=>t.action==="blocked").length / last100.length * 1000)/10 : 0
+    const body = {
+      account_id: form.account_id || null,
+      montant:    parseFloat(form.montant),
+      commercant: form.commercant,
+      device:     form.device,
+      timestamp:  form.timestamp || null,
     };
-  }, [transactions]);
+    lastTxRef.current = body;
+
+    try {
+      const r = await fetch(`${API}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      setResult(await r.json());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNarrative = async () => {
+    if (!lastTxRef.current) return;
+    setNarrative({ data: null, loading: true, error: null });
+    try {
+      const r = await fetch(`${API}/analyze/narrative`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lastTxRef.current),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      setNarrative({ data: await r.json(), loading: false, error: null });
+    } catch (e) {
+      setNarrative({ data: null, loading: false, error: e.message });
+    }
+  };
+
+  const loadRandomTx = async (wantFraud) => {
+    try {
+      const r = await fetch(`${API}/transactions/sample?n=10`);
+      const d = await r.json();
+      const ids = wantFraud ? d.fraud : d.legitimate;
+      if (!ids?.length) return;
+      const tid = ids[Math.floor(Math.random() * ids.length)];
+
+      const r2 = await fetch(`${API}/transactions/${tid}/details`);
+      if (!r2.ok) return;
+      const tx = await r2.json();
+
+      setForm({
+        account_id: tx.account_id || "",
+        montant:    String(tx.montant),
+        commercant: tx.commercant,
+        device:     tx.device,
+        timestamp:  "",
+      });
+      setResult(null);
+      setNarrative({ data: null, loading: false, error: null });
+    } catch {}
+  };
 
   return (
-    <div style={{display:"grid", gridTemplateColumns: selectedAccount ? "340px 1fr 380px" : "340px 1fr", height:"100%", minHeight:0}}>
-      {/* Accounts panel */}
-      <div className="panel" style={{borderRight:"1px solid var(--line)", display:"flex", flexDirection:"column", minHeight:0}}>
-        <div style={{padding:"14px 14px 10px", borderBottom:"1px solid var(--line)"}}>
-          <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:10}}>
-            <div style={{fontSize:11, letterSpacing:0.6, color:"var(--ink-50)", fontWeight:600}}>
-              COMPTES · {filteredAccounts.length}
-            </div>
-            <span className="mono" style={{fontSize:10, color:"var(--ink-40)"}}>tri: risque ↓</span>
-          </div>
-          <input className="input" placeholder="rechercher compte ou ID…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          <div style={{display:"flex", gap:4, marginTop:8, flexWrap:"wrap"}}>
-            <button className="chip" data-active={profileFilter==="all"} onClick={()=>setProfileFilter("all")}>Tous</button>
-            {window.FraudNet.PROFILE_TYPES.map(p => (
-              <button key={p.key} className="chip" data-active={profileFilter===p.key} onClick={()=>setProfileFilter(p.key)}>
-                {p.icon} {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{flex:1, overflowY:"auto", padding:"6px 8px"}}>
-          {filteredAccounts.map(a => (
-            <AccountRow
-              key={a.id}
-              account={a}
-              selected={a.id === selectedAccountId}
-              pulse={a.id === pulseAccount}
-              onClick={() => setSelectedAccountId(a.id === selectedAccountId ? null : a.id)}
-            />
-          ))}
-        </div>
-      </div>
+    <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
 
-      {/* Feed panel */}
-      <div className="panel" style={{display:"flex", flexDirection:"column", minHeight:0}}>
-        <div style={{padding:"12px 18px", borderBottom:"1px solid var(--line)"}}>
-          <div style={{display:"flex", gap:14, alignItems:"center"}}>
-            <div style={{display:"flex", alignItems:"center", gap:8}}>
-              <span className={`pulse-dot ${paused?"paused":""}`}/>
-              <span style={{fontSize:11, letterSpacing:0.6, color: paused?"var(--ink-40)":"var(--ok)", fontWeight:600}}>
-                {paused ? "PAUSED" : "LIVE"}
-              </span>
+      {/* ── Formulaire ── */}
+      <div style={{
+        width: 380, flexShrink: 0, borderRight: "1px solid #e4ddd3",
+        display: "flex", flexDirection: "column", overflowY: "auto"
+      }}>
+        <div style={{ padding: "22px 24px 18px", borderBottom: "1px solid #e4ddd3" }}>
+          <div style={{ fontSize: 10, letterSpacing: 0.8, color: "#8596af", fontWeight: 600, marginBottom: 4 }}>
+            MARS ANALYZER
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#0c1b34" }}>
+            Tester un virement
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#3d4e6a", lineHeight: 1.5 }}>
+            Saisissez les détails d'une transaction. Le pipeline MARS (5 agents)
+            analyse et décide en temps réel.
+          </p>
+        </div>
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+
+          {/* Compte */}
+          <div>
+            <label style={labelStyle}>Compte</label>
+            <select
+              value={form.account_id}
+              onChange={e => setField("account_id", e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">— Compte inconnu —</option>
+              {accounts.map(a => (
+                <option key={a.account_id} value={a.account_id}>{a.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: "#8596af", marginTop: 4 }}>
+              Optionnel — le contexte historique enrichit l'analyse
             </div>
-            <button className="chip" onClick={()=>setPaused(p=>!p)}>{paused?"▶ Reprendre":"❚❚ Pause"}</button>
-            <div style={{display:"flex", alignItems:"center", gap:6, fontSize:11, color:"var(--ink-50)"}}>
-              Vitesse
-              <input type="range" min="0.3" max="4" step="0.1" value={speed} onChange={e=>setSpeed(parseFloat(e.target.value))} style={{width:100}}/>
-              <span className="mono" style={{minWidth:32}}>{speed.toFixed(1)}x</span>
-            </div>
-            <div style={{flex:1}}/>
-            <div style={{display:"flex", gap:4}}>
-              {[["all","Tous"],["blocked","Bloqués"],["review","À examiner"],["approved","Approuvés"]].map(([k,l]) => (
-                <button key={k} className="chip" data-active={filter===k} onClick={()=>setFilter(k)}>{l}</button>
+          </div>
+
+          {/* Montant */}
+          <div>
+            <label style={labelStyle}>Montant (CAD)</label>
+            <input
+              type="number" min="0.01" step="0.01"
+              placeholder="ex: 450.00"
+              value={form.montant}
+              onChange={e => setField("montant", e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Marchand */}
+          <div>
+            <label style={labelStyle}>Marchand</label>
+            <select
+              value={form.commercant}
+              onChange={e => setField("commercant", e.target.value)}
+              style={inputStyle}
+            >
+              {MERCHANTS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+
+          {/* Device */}
+          <div>
+            <label style={labelStyle}>Appareil</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              {["mobile", "tablette", "desktop"].map(d => (
+                <button
+                  key={d}
+                  onClick={() => setField("device", d)}
+                  style={{
+                    flex: 1, padding: "7px 0", borderRadius: 6, fontSize: 12,
+                    fontWeight: form.device === d ? 700 : 400,
+                    background: form.device === d ? "#0c1b34" : "#fff",
+                    color: form.device === d ? "#fff" : "#3d4e6a",
+                    border: `1px solid ${form.device === d ? "#0c1b34" : "#e4ddd3"}`,
+                    cursor: "pointer", transition: "all .15s",
+                  }}
+                >{d}</button>
               ))}
             </div>
           </div>
-          <div style={{display:"grid", gridTemplateColumns:"repeat(5, 1fr)", gap:10, marginTop:14}}>
-            <div className="stat-card"><div className="stat-label">Transactions</div><div className="stat-value mono">{stats.total}</div></div>
-            <div className="stat-card"><div className="stat-label">Bloquées</div><div className="stat-value mono" style={{color:"var(--alert)"}}>{stats.blocked}</div></div>
-            <div className="stat-card"><div className="stat-label">À examiner</div><div className="stat-value mono" style={{color:"var(--warn)"}}>{stats.review}</div></div>
-            <div className="stat-card"><div className="stat-label">Taux de blocage</div><div className="stat-value mono">{stats.rate}%</div></div>
-            <div className="stat-card"><div className="stat-label">$ Sauvés</div><div className="stat-value mono" style={{color:"var(--ok)"}}>${Math.round(stats.saved).toLocaleString("fr-CA")}</div></div>
+
+          {/* Timestamp */}
+          <div>
+            <label style={labelStyle}>Horodatage <span style={{ color: "#8596af", fontWeight: 400 }}>(optionnel)</span></label>
+            <input
+              type="datetime-local"
+              value={form.timestamp}
+              onChange={e => setField("timestamp", e.target.value)}
+              style={inputStyle}
+            />
           </div>
-        </div>
-        <div ref={feedRef} style={{flex:1, overflowY:"auto", padding:"10px 14px", display:"flex", flexDirection:"column", gap:6}}>
-          {filteredTxns.length === 0 && (
-            <div style={{padding:40, textAlign:"center", color:"var(--ink-40)", fontSize:12}}>
-              Flux en attente… {paused ? "Reprenez la lecture pour voir les transactions arriver." : ""}
+
+          {/* Boutons */}
+          <button
+            onClick={handleAnalyze}
+            disabled={loading || !form.montant}
+            style={{
+              padding: "12px", borderRadius: 8, fontSize: 14, fontWeight: 700,
+              background: loading || !form.montant ? "#cfc8be" : "#be1f26",
+              color: "#fff", border: "none", cursor: loading || !form.montant ? "default" : "pointer",
+              letterSpacing: 0.5, transition: "background .15s",
+            }}
+          >
+            {loading ? "Analyse en cours…" : "Analyser"}
+          </button>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => loadRandomTx(true)}  style={ghostBtn}>Fraude aléatoire</button>
+            <button onClick={() => loadRandomTx(false)} style={ghostBtn}>Légitime aléatoire</button>
+          </div>
+
+          {error && (
+            <div style={{ fontSize: 12, color: "#be1f26", background: "#fef2f2", padding: 10, borderRadius: 6 }}>
+              {error}
             </div>
           )}
-          {filteredTxns.map((t,i) => (
-            <TransactionCard key={t.id} txn={t} isNew={i===0} onClick={()=>setSelectedTxn(t)}/>
-          ))}
         </div>
       </div>
 
-      {/* Detail drawer */}
-      {selectedAccount && (
-        <AccountDetail account={selectedAccount} recentTxns={transactions} onClose={()=>setSelectedAccountId(null)}/>
-      )}
-
-      {selectedTxn && (
-        <TransactionDetail
-          txn={selectedTxn}
-          account={accounts.find(a=>a.id===selectedTxn.accountId)}
-          onClose={()=>setSelectedTxn(null)}
-        />
-      )}
+      {/* ── Résultats ── */}
+      <ResultPanel result={result} onNarrative={handleNarrative} narrativeState={narrative}/>
     </div>
   );
 }
+
+const labelStyle = {
+  display: "block", fontSize: 11, fontWeight: 600, color: "#3d4e6a",
+  letterSpacing: 0.3, marginBottom: 6,
+};
+const inputStyle = {
+  width: "100%", padding: "8px 10px", borderRadius: 6, fontSize: 13,
+  border: "1px solid #e4ddd3", background: "#fff", color: "#0c1b34",
+  boxSizing: "border-box", fontFamily: "inherit", outline: "none",
+};
+const ghostBtn = {
+  flex: 1, padding: "8px 0", fontSize: 11, fontWeight: 600,
+  background: "#fff", color: "#3d4e6a", border: "1px solid #e4ddd3",
+  borderRadius: 6, cursor: "pointer",
+};
 
 Object.assign(window, { LiveOps });

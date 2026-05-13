@@ -12,15 +12,17 @@ import numpy as np
 import pandas as pd
 
 from src.detection.baseline.agent  import score as score_baseline, load_data, FEATURES_PATH
-from src.detection.graph.agent     import score as score_graph
+from src.detection.graph           import score_g1, score_g2, score_g3
 
 REPORTS_DIR = Path("reports")
 
 # Poids initiaux par agent (ajustés dynamiquement en prod)
 DEFAULT_WEIGHTS = {
-    "baseline": 0.50,
-    "sequence": 0.25,
-    "graph":    0.25,
+    "baseline":   0.40,
+    "sequence":   0.20,
+    "g1_device":  0.15,
+    "g2_merchant":0.15,
+    "g3_temporal":0.10,
 }
 
 # Seuils de décision
@@ -35,10 +37,12 @@ CONTRADICTION_DELTA   = 0.40   # écart entre agents → contradiction
 
 @dataclass
 class AgentScores:
-    baseline: float
-    sequence: float
-    graph:    float
-    contradiction: bool      = False
+    baseline:    float
+    sequence:    float
+    g1_device:   float
+    g2_merchant: float
+    g3_temporal: float
+    contradiction: bool       = False
     contradiction_detail: str = ""
 
 
@@ -100,14 +104,20 @@ def decide(score_final: float) -> str:
 def run_mars(df: pd.DataFrame, sequence_scores: np.ndarray | None = None) -> pd.DataFrame:
     """
     Retourne df enrichi avec les colonnes MARS :
-      score_baseline, score_sequence, score_graph,
+      score_baseline, score_sequence, score_g1_device, score_g2_merchant, score_g3_temporal,
       score_mars, decision_mars, contradiction, confidence_mars
     """
     print("→ Agent Baseline...")
     s_baseline = score_baseline(df)
 
-    print("→ Agent Graphe...")
-    s_graph = score_graph(df)
+    print("→ Agent G1 (Device Sharing — GraphSAGE)...")
+    s_g1 = score_g1(df)
+
+    print("→ Agent G2 (Merchant Targeting — GAT bipartite)...")
+    s_g2 = score_g2(df)
+
+    print("→ Agent G3 (Temporal Velocity — GCN pondéré)...")
+    s_g3 = score_g3(df)
 
     if sequence_scores is not None:
         s_sequence = sequence_scores
@@ -118,22 +128,26 @@ def run_mars(df: pd.DataFrame, sequence_scores: np.ndarray | None = None) -> pd.
     results = []
     for i in range(len(df)):
         raw_scores = {
-            "baseline": float(s_baseline[i]),
-            "sequence": float(s_sequence[i]),
-            "graph":    float(s_graph[i]),
+            "baseline":    float(s_baseline[i]),
+            "sequence":    float(s_sequence[i]),
+            "g1_device":   float(s_g1[i]),
+            "g2_merchant": float(s_g2[i]),
+            "g3_temporal": float(s_g3[i]),
         }
         score_f, contradiction, detail = aggregate(raw_scores)
         decision = decide(score_f)
         confidence = 1.0 - abs(score_f - THRESHOLD_BLOCK) / THRESHOLD_BLOCK
 
         results.append({
-            "score_baseline":  raw_scores["baseline"],
-            "score_sequence":  raw_scores["sequence"],
-            "score_graph":     raw_scores["graph"],
-            "score_mars":      score_f,
-            "decision_mars":   decision,
-            "contradiction":   contradiction,
-            "confidence_mars": round(confidence, 4),
+            "score_baseline":    raw_scores["baseline"],
+            "score_sequence":    raw_scores["sequence"],
+            "score_g1_device":   raw_scores["g1_device"],
+            "score_g2_merchant": raw_scores["g2_merchant"],
+            "score_g3_temporal": raw_scores["g3_temporal"],
+            "score_mars":        score_f,
+            "decision_mars":     decision,
+            "contradiction":     contradiction,
+            "confidence_mars":   round(confidence, 4),
         })
 
     return df.assign(**{k: [r[k] for r in results] for k in results[0]})
