@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 
 import numpy as np
@@ -132,7 +132,16 @@ def _sample_montant(cfg: dict, rng: np.random.Generator) -> float:
 # Générateur principal
 # ---------------------------------------------------------------------------
 
-def generate_accounts(n: int, config_path: Path, seed: int = 42) -> list[Account]:
+def generate_accounts(
+    n: int,
+    config_path: Path,
+    seed: int = 42,
+    archetype_weights: dict[str, float] | None = None,
+) -> list[Account]:
+    """
+    archetype_weights: override default weights from YAML.
+    Keys must match archetype names; values are raw weights (normalised internally).
+    """
     rng = np.random.default_rng(seed)
     Faker.seed(seed)
 
@@ -141,9 +150,14 @@ def generate_accounts(n: int, config_path: Path, seed: int = 42) -> list[Account
 
     archetypes = config["archetypes"]
     noms = list(archetypes.keys())
-    poids = [archetypes[a]["weight"] for a in noms]
 
-    # Distribution du nombre de comptes par archétype
+    if archetype_weights:
+        raw = [archetype_weights.get(a, 0.0) for a in noms]
+        total = sum(raw) or 1.0
+        poids = [w / total for w in raw]
+    else:
+        poids = [archetypes[a]["weight"] for a in noms]
+
     counts = rng.multinomial(n, poids)
 
     accounts: list[Account] = []

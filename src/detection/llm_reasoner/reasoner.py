@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 load_dotenv()
 

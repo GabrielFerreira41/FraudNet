@@ -282,13 +282,13 @@ class FraudPredictor:
             "transactions":   transactions,
         }
 
-    def graph_network(self) -> dict:
+    def graph_network(self, max_peers: int = 25) -> dict:
         """Fraud network graph for D3 (accounts + merchants + edges)."""
         fraud_tx    = self.features_df[self.features_df["is_fraud"]].copy()
         fraud_accs  = set(fraud_tx["account_id"].unique())
         fraud_merch = set(fraud_tx["commercant"].unique())
 
-        # Top-25 legit accounts that visited fraud merchants
+        # Top-N legit accounts that visited fraud merchants (ordered by visit frequency)
         peer_tx = self.features_df[
             (~self.features_df["is_fraud"]) &
             (self.features_df["commercant"].isin(fraud_merch)) &
@@ -296,7 +296,7 @@ class FraudPredictor:
         ]
         peer_accs = set(
             peer_tx.groupby("account_id")["transaction_id"]
-            .count().nlargest(25).index
+            .count().nlargest(max_peers).index
         )
         all_accs = fraud_accs | peer_accs
 
@@ -359,7 +359,6 @@ class FraudPredictor:
             peer_tx[peer_tx["account_id"].isin(peer_accs)]
             .groupby(["account_id", "commercant"], as_index=False)
             .agg(montant=("montant", "mean"))
-            .head(60)
         )
         for _, tx in peer_sample.iterrows():
             edges.append({
@@ -371,6 +370,204 @@ class FraudPredictor:
             })
 
         return {"nodes": nodes, "edges": edges}
+
+    def dataset_stats(
+        self,
+        archetype: str = "all",
+        province:  str = "all",
+        fraud_type: str = "all",
+    ) -> dict:
+        """Agrégations filtrées pour la vue exploration de données."""
+        df = self.features_df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+        # Merge province depuis accounts
+        df = df.merge(
+            self.accounts_df[["account_id", "province"]],
+            on="account_id", how="left",
+        )
+
+        # Filtres
+        if archetype != "all":
+            df = df[df["archetype"] == archetype]
+        if province != "all":
+            df = df[df["province"] == province]
+        if fraud_type != "all":
+            df = df[(~df["is_fraud"]) | (df["fraud_type"] == fraud_type)]
+
+        n_tx    = len(df)
+        n_fraud = int(df["is_fraud"].sum())
+
+        # ── KPIs ──
+        kpis = {
+            "n_transactions": n_tx,
+            "n_accounts":     int(df["account_id"].nunique()),
+            "n_fraud":        n_fraud,
+            "fraud_rate":     round(n_fraud / max(n_tx, 1), 6),
+            "total_montant":  round(float(df["montant"].sum()), 2),
+            "montant_moyen":  round(float(df["montant"].mean()), 2),
+        }
+
+        # ── Timeline hebdomadaire ──
+        df["week"] = df["timestamp"].dt.to_period("W").dt.start_time
+        weekly = (
+            df.groupby("week")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_total=("montant", "sum"))
+            .reset_index()
+        )
+        weekly["week"]         = weekly["week"].dt.strftime("%Y-%m-%d")
+        weekly["n_fraud"]      = weekly["n_fraud"].astype(int)
+        weekly["montant_total"] = weekly["montant_total"].round(2)
+
+        # ── Distribution horaire ──
+        hourly_raw = (
+            df.groupby("heure")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_moyen=("montant", "mean"))
+            .reset_index()
+        )
+        hourly = (
+            pd.DataFrame({"heure": range(24)})
+            .merge(hourly_raw, on="heure", how="left")
+            .fillna(0)
+        )
+        hourly["n_tx"]         = hourly["n_tx"].astype(int)
+        hourly["n_fraud"]      = hourly["n_fraud"].astype(int)
+        hourly["montant_moyen"] = hourly["montant_moyen"].round(2)
+
+        # ── Par type de fraude ──
+        fraud_df = df[df["is_fraud"] & df["fraud_type"].notna()]
+        by_type = (
+            fraud_df["fraud_type"].value_counts()
+            .reset_index()
+            .rename(columns={"fraud_type": "type", "count": "n"})
+        )
+
+        # ── Par marchand (top 15 par n_fraud) ──
+        by_merch = (
+            df.groupby("commercant")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_moyen=("montant", "mean"))
+            .reset_index()
+            .sort_values("n_fraud", ascending=False)
+            .head(15)
+        )
+        by_merch["n_fraud"]      = by_merch["n_fraud"].astype(int)
+        by_merch["montant_moyen"] = by_merch["montant_moyen"].round(2)
+
+        # ── Par archétype ──
+        by_arch = (
+            df.groupby("archetype")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_moyen=("montant", "mean"))
+            .reset_index()
+        )
+        by_arch["fraud_rate"] = (by_arch["n_fraud"] / by_arch["n_tx"]).round(5)
+        by_arch["n_fraud"]    = by_arch["n_fraud"].astype(int)
+
+        # ── Par device ──
+        by_device = (
+            df.groupby("device")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"))
+            .reset_index()
+        )
+        by_device["n_fraud"] = by_device["n_fraud"].astype(int)
+
+        # ── Par province ──
+        by_province = (
+            df.groupby("province")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"))
+            .reset_index()
+            .sort_values("n_tx", ascending=False)
+        )
+        by_province["n_fraud"] = by_province["n_fraud"].astype(int)
+
+        # ── Distribution des montants ──
+        bins   = [0, 25, 100, 500, 2000, float("inf")]
+        labels = ["< 25 $", "25–100 $", "100–500 $", "500–2k $", "> 2k $"]
+        df["bucket"] = pd.cut(df["montant"], bins=bins, labels=labels, right=False)
+        by_amount = (
+            df.groupby("bucket", observed=True)
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"))
+            .reset_index()
+        )
+        by_amount["n_fraud"] = by_amount["n_fraud"].astype(int)
+        by_amount["bucket"]  = by_amount["bucket"].astype(str)
+
+        # ── Par catégorie ──
+        by_cat = (
+            df.groupby("categorie")
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_moyen=("montant", "mean"))
+            .reset_index()
+            .sort_values("n_fraud", ascending=False)
+        )
+        by_cat["n_fraud"]      = by_cat["n_fraud"].astype(int)
+        by_cat["montant_moyen"] = by_cat["montant_moyen"].round(2)
+
+        # ── Par tranche d'âge ──
+        from datetime import date as _date
+        acc_copy = self.accounts_df[["account_id", "date_naissance"]].copy()
+        acc_copy["age"] = pd.to_datetime(acc_copy["date_naissance"]).apply(
+            lambda d: (_date.today() - d.date()).days // 365
+        )
+        age_bins   = [0, 25, 35, 45, 55, 65, 200]
+        age_labels = ["< 25", "25-34", "35-44", "45-54", "55-64", "65+"]
+        acc_copy["age_group"] = pd.cut(
+            acc_copy["age"], bins=age_bins, labels=age_labels, right=False
+        )
+        df_age = df.merge(acc_copy[["account_id", "age_group"]], on="account_id", how="left")
+        by_age = (
+            df_age.groupby("age_group", observed=True)
+            .agg(n_tx=("transaction_id", "count"),
+                 n_fraud=("is_fraud", "sum"),
+                 montant_moyen=("montant", "mean"))
+            .reset_index()
+        )
+        by_age["fraud_rate"]    = (by_age["n_fraud"] / by_age["n_tx"].clip(lower=1)).round(5)
+        by_age["n_fraud"]       = by_age["n_fraud"].astype(int)
+        by_age["montant_moyen"] = by_age["montant_moyen"].round(2)
+        by_age["age_group"]     = by_age["age_group"].astype(str)
+
+        # ── Heatmap fraude : fraud_type × archétype ──
+        fraud_only = df[df["is_fraud"] & df["fraud_type"].notna()]
+        if len(fraud_only) > 0:
+            heatmap_rows = (
+                fraud_only.groupby(["fraud_type", "archetype"])
+                .size()
+                .reset_index(name="n")
+                .to_dict(orient="records")
+            )
+        else:
+            heatmap_rows = []
+
+        # ── Montant moyen par archétype (pour bubble) ──
+        by_arch_rich = by_arch.copy()
+        by_arch_rich["montant_moyen"] = by_arch_rich["montant_moyen"].round(2)
+
+        return {
+            "kpis":         kpis,
+            "weekly":       weekly.to_dict(orient="records"),
+            "hourly":       hourly.to_dict(orient="records"),
+            "by_type":      by_type.to_dict(orient="records"),
+            "by_merchant":  by_merch.to_dict(orient="records"),
+            "by_archetype": by_arch_rich.to_dict(orient="records"),
+            "by_device":    by_device.to_dict(orient="records"),
+            "by_province":  by_province.to_dict(orient="records"),
+            "by_amount":    by_amount.to_dict(orient="records"),
+            "by_category":  by_cat.to_dict(orient="records"),
+            "by_age_group": by_age.to_dict(orient="records"),
+            "heatmap":      heatmap_rows,
+        }
 
     def _account_context(self, account_id: str) -> dict | None:
         """Construit le profil contextuel d'un compte pour enrichir l'analyse."""

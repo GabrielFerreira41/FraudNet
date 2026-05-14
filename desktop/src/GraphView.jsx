@@ -1,6 +1,8 @@
-// GraphView.jsx — Réseau Neo4j · FraudNet
+// GraphView.jsx — Réseau de fraude · FraudNet
 
-const { useState: useStateG, useEffect: useEffectG, useRef: useRefG } = React;
+const { useState: useStateG, useEffect: useEffectG, useRef: useRefG, useMemo: useMemoG } = React;
+
+const API = "http://localhost:8000";
 
 const FRAUD_COLORS = {
   test_carte:      "#c86020",
@@ -16,128 +18,380 @@ const FRAUD_LABELS = {
   prise_de_compte: "Prise de compte",
   reseau_mules:    "Réseau de mules",
 };
+const ARCH_LABELS = {
+  etudiant: "Étudiant", famille: "Famille", entreprise: "Entreprise",
+  jeune_actif: "Jeune actif", retraite: "Retraité",
+  professionnel: "Professionnel", voyageur: "Voyageur",
+};
 
-// ── Legend ──────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function nodeColor(n) {
+  if (n.type === "merchant") return "#7c5828";
+  if (!n.fraud) return "#1e3a5f";
+  if (n.fraud_types?.length === 1) return FRAUD_COLORS[n.fraud_types[0]] || "#be1f26";
+  return "#be1f26";
+}
+function nodeStroke(n) {
+  if (n.type === "merchant") return "#b08840";
+  if (!n.fraud) return "#4878a8";
+  return "#f08090";
+}
+function edgeColor(e) {
+  if (!e.fraud) return "rgba(30,58,95,.15)";
+  return (FRAUD_COLORS[e.fraud_type] || "#be1f26") + "99";
+}
+function edgeWidth(e) {
+  if (!e.fraud) return 0.8;
+  const m = e.montant || 100;
+  return Math.max(1, Math.min(5, 1 + Math.log10(m / 10)));
+}
+function fmtCAD(v) {
+  return v?.toLocaleString("fr-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }) ?? "—";
+}
+
+// ── Legend ───────────────────────────────────────────────────────────────────
 
 function Legend() {
   return (
     <div style={{
-      position: "absolute", top: 16, left: 16,
+      position: "absolute", top: 14, left: 14,
       background: "var(--card)", border: "1px solid var(--border)",
-      padding: "14px 16px", minWidth: 172,
+      padding: "12px 14px", minWidth: 168, fontSize: 11,
     }}>
       <div style={{ fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 10 }}>
-        Légende
+        Nœuds
       </div>
-      {[
-        { shape: "circle",  fill: "#be1f26", stroke: "#e85060", label: "Compte frauduleux" },
-        { shape: "circle",  fill: "#1e3a5f", stroke: "#4878a8", label: "Compte pair" },
-        { shape: "diamond", fill: "#7c5828", stroke: "#b08840", label: "Marchand impliqué" },
-      ].map(({ shape, fill, stroke, label }) => (
-        <div key={label} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8 }}>
-          <svg width={18} height={18} style={{ flexShrink: 0 }}>
-            {shape === "circle"
-              ? <circle cx={9} cy={9} r={6} fill={fill} stroke={stroke} strokeWidth={1.5}/>
-              : <rect x={4} y={4} width={10} height={10} fill={fill} stroke={stroke} strokeWidth={1.5} transform="rotate(45 9 9)"/>
-            }
-          </svg>
-          <span style={{ fontSize: 11, color: "var(--ink-2)" }}>{label}</span>
+      {Object.entries(FRAUD_LABELS).map(([k, v]) => (
+        <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <svg width={14} height={14}><circle cx={7} cy={7} r={5} fill={FRAUD_COLORS[k]} stroke={FRAUD_COLORS[k] + "aa"} strokeWidth={1.5}/></svg>
+          <span style={{ color: "var(--ink-2)" }}>{v}</span>
         </div>
       ))}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 2 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <svg width={14} height={14}><circle cx={7} cy={7} r={5} fill="#1e3a5f" stroke="#4878a8" strokeWidth={1.5}/></svg>
+        <span style={{ color: "var(--ink-2)" }}>Compte pair</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <svg width={14} height={14}><rect x={2} y={2} width={10} height={10} fill="#7c5828" stroke="#b08840" strokeWidth={1.5} transform="rotate(45 7 7)"/></svg>
+        <span style={{ color: "var(--ink-2)" }}>Marchand</span>
+      </div>
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
         <div style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 7 }}>
-          Relations
+          Arêtes
         </div>
-        {[
-          { color: "rgba(190,31,38,.55)", label: "Transaction frauduleuse", h: 2 },
-          { color: "rgba(30,58,95,.2)",   label: "Transaction légitime",    h: 1 },
-        ].map(({ color, label, h }) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 6 }}>
-            <div style={{ width: 20, height: h, background: color, flexShrink: 0 }}/>
-            <span style={{ fontSize: 11, color: "var(--ink-2)" }}>{label}</span>
-          </div>
-        ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+          <div style={{ width: 18, height: 2.5, background: "#be1f26aa" }}/>
+          <span style={{ color: "var(--ink-2)" }}>Transaction fraude</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 18, height: 1, background: "rgba(30,58,95,.4)" }}/>
+          <span style={{ color: "var(--ink-2)" }}>Transaction légitime</span>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 7 }}>
+          Épaisseur ∝ montant
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Node detail panel ────────────────────────────────────────────────────
+// ── Stats panel ───────────────────────────────────────────────────────────────
 
-function NodePanel({ node, onClose }) {
-  if (!node) return null;
-  const isAcc  = node.type === "account";
-  const accent = isAcc ? (node.fraud ? "#be1f26" : "#1e3a5f") : "#7c5828";
+function StatsPanel({ graphData, selectedNode, filteredNodes, filteredEdges }) {
+  if (!graphData) return null;
+
+  if (selectedNode) {
+    return <NodeDetail node={selectedNode} edges={filteredEdges} nodes={filteredNodes}/>;
+  }
+
+  // Global network stats
+  const fraudNodes  = filteredNodes.filter(n => n.type === "account" && n.fraud);
+  const peerNodes   = filteredNodes.filter(n => n.type === "account" && !n.fraud);
+  const merchants   = filteredNodes.filter(n => n.type === "merchant");
+  const fraudEdges  = filteredEdges.filter(e => e.fraud);
+
+  // Fraud type distribution
+  const ftCounts = {};
+  fraudNodes.forEach(n => (n.fraud_types || []).forEach(ft => {
+    ftCounts[ft] = (ftCounts[ft] || 0) + 1;
+  }));
+  const ftMax = Math.max(1, ...Object.values(ftCounts));
+
+  // Archetype distribution
+  const archCounts = {};
+  filteredNodes.filter(n => n.type === "account").forEach(n => {
+    const k = n.archetype || "?";
+    archCounts[k] = (archCounts[k] || 0) + 1;
+  });
+
+  // Top merchants
+  const topMerchants = merchants
+    .filter(n => n.n_fraud_tx > 0)
+    .sort((a, b) => b.n_fraud_tx - a.n_fraud_tx)
+    .slice(0, 5);
+  const maxFraudTx = Math.max(1, topMerchants[0]?.n_fraud_tx || 1);
+
+  // Total fraud montant
+  const totalMontant = fraudEdges.reduce((s, e) => s + (e.montant || 0), 0);
+
   return (
-    <div style={{
-      position: "absolute", bottom: 16, right: 16, width: 252,
-      background: "var(--card)", border: "1px solid var(--border)", overflow: "hidden",
-    }}>
-      <div style={{
-        padding: "10px 14px",
-        borderBottom: "1px solid var(--border)",
-        background: accent + "10",
-        display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-      }}>
-        <div>
-          <div style={{ fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 600, color: accent }}>
-            {isAcc ? (node.fraud ? "Compte frauduleux" : "Compte pair") : "Marchand"}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
-            {isAcc ? node.full_name : node.label}
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+      {/* Network summary */}
+      <div>
+        <SectionLabel>Réseau filtré</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[
+            { label: "Comptes frauduleux", value: fraudNodes.length, alert: true },
+            { label: "Comptes pairs",       value: peerNodes.length },
+            { label: "Marchands",           value: merchants.length },
+            { label: "Arêtes fraude",       value: fraudEdges.length, alert: true },
+          ].map((s, i) => (
+            <div key={i} style={{
+              padding: "7px 9px", borderRadius: 5,
+              background: s.alert ? "rgba(190,31,38,.05)" : "#f7f4ee",
+              border: `1px solid ${s.alert ? "rgba(190,31,38,.15)" : "var(--border)"}`,
+            }}>
+              <div style={{ fontSize: 9, color: "var(--ink-3)", marginBottom: 2 }}>{s.label}</div>
+              <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 15,
+                color: s.alert ? "#be1f26" : "var(--navy)" }}>{s.value}</div>
+            </div>
+          ))}
         </div>
-        <button onClick={onClose} style={{ fontSize: 18, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
-      </div>
-      <div style={{ padding: "12px 14px 14px" }}>
-        {isAcc ? (
-          <>
-            <PRow label="Archétype"    value={node.archetype} />
-            <PRow label="Province"     value={node.province} />
-            <PRow label="Transactions" value={node.n_tx?.toLocaleString("fr-CA")} mono />
-            {node.fraud && node.fraud_types?.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--ink-3)", fontWeight: 600, marginBottom: 6 }}>
-                  Types de fraude
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {node.fraud_types.map(ft => (
-                    <span key={ft} style={{
-                      fontSize: 9, fontWeight: 600, padding: "3px 7px",
-                      background: (FRAUD_COLORS[ft] || "#be1f26") + "18",
-                      color: FRAUD_COLORS[ft] || "#be1f26",
-                      border: `1px solid ${(FRAUD_COLORS[ft] || "#be1f26")}40`,
-                    }}>
-                      {FRAUD_LABELS[ft] || ft}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <PRow label="Catégorie"       value={node.categorie} />
-            <PRow label="Tx frauduleuses" value={node.n_fraud_tx} mono />
-          </>
+        {totalMontant > 0 && (
+          <div style={{ marginTop: 8, padding: "7px 9px", borderRadius: 5,
+            background: "rgba(190,31,38,.05)", border: "1px solid rgba(190,31,38,.15)" }}>
+            <div style={{ fontSize: 9, color: "var(--ink-3)", marginBottom: 2 }}>Montant total fraudé</div>
+            <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 14, color: "#be1f26" }}>
+              {fmtCAD(totalMontant)}
+            </div>
+          </div>
         )}
       </div>
+
+      {/* Fraud type breakdown */}
+      {Object.keys(ftCounts).length > 0 && (
+        <div>
+          <SectionLabel>Types de fraude</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {Object.entries(ftCounts).sort((a, b) => b[1] - a[1]).map(([ft, n]) => (
+              <div key={ft}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: FRAUD_COLORS[ft] || "#be1f26", fontWeight: 600 }}>
+                    {FRAUD_LABELS[ft] || ft}
+                  </span>
+                  <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--navy)", fontWeight: 600 }}>{n}</span>
+                </div>
+                <div style={{ height: 4, background: "var(--border)", borderRadius: 2 }}>
+                  <div style={{ width: `${Math.round(n / ftMax * 100)}%`, height: "100%",
+                    background: FRAUD_COLORS[ft] || "#be1f26", borderRadius: 2 }}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top merchants */}
+      {topMerchants.length > 0 && (
+        <div>
+          <SectionLabel>Marchands les plus ciblés</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {topMerchants.map((m, i) => (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10, color: "var(--ink-3)", width: 14, textAlign: "right" }}>{i + 1}</span>
+                <span style={{ fontSize: 11, flex: 1, color: "var(--navy)", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label}</span>
+                <div style={{ width: 48, height: 4, background: "var(--border)", borderRadius: 2 }}>
+                  <div style={{ width: `${Math.round(m.n_fraud_tx / maxFraudTx * 100)}%`,
+                    height: "100%", background: "#7c5828", borderRadius: 2 }}/>
+                </div>
+                <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "#7c5828",
+                  width: 24, textAlign: "right" }}>{m.n_fraud_tx}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Archetype distribution */}
+      {Object.keys(archCounts).length > 0 && (
+        <div>
+          <SectionLabel>Profils clients</SectionLabel>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {Object.entries(archCounts).sort((a, b) => b[1] - a[1]).map(([arch, n]) => (
+              <span key={arch} style={{
+                fontSize: 10, padding: "3px 8px", borderRadius: 10,
+                background: "#f7f4ee", border: "1px solid var(--border)", color: "var(--ink-2)",
+              }}>
+                {ARCH_LABELS[arch] || arch} <span style={{ fontFamily: "var(--mono)", color: "var(--navy)", fontWeight: 600 }}>{n}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, color: "var(--ink-3)", paddingTop: 4, borderTop: "1px solid var(--border)" }}>
+        Cliquer un nœud pour voir ses connexions
+      </div>
     </div>
   );
 }
 
-function PRow({ label, value, mono }) {
+function NodeDetail({ node, edges, nodes }) {
+  const isAcc   = node.type === "account";
+  const accent  = isAcc ? (node.fraud ? "#be1f26" : "#1e3a5f") : "#7c5828";
+  const nodeId  = node.id;
+
+  // Connexions directes
+  const connEdges = edges.filter(e => {
+    const s = e.source?.id ?? e.source;
+    const t = e.target?.id ?? e.target;
+    return s === nodeId || t === nodeId;
+  });
+  const connIds = new Set(connEdges.map(e => {
+    const s = e.source?.id ?? e.source;
+    const t = e.target?.id ?? e.target;
+    return s === nodeId ? t : s;
+  }));
+  const connNodes = nodes.filter(n => connIds.has(n.id));
+
+  const fraudConnEdges = connEdges.filter(e => e.fraud);
+  const legitConnEdges = connEdges.filter(e => !e.fraud);
+  const totalFraudMontant = fraudConnEdges.reduce((s, e) => s + (e.montant || 0), 0);
+
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-      <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{label}</span>
-      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", fontFamily: mono ? "var(--mono)" : "inherit" }}>
-        {value ?? "—"}
-      </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Header */}
+      <div style={{
+        padding: "10px 12px", borderRadius: 6,
+        background: accent + "10", border: `1px solid ${accent}30`,
+      }}>
+        <div style={{ fontSize: 9, letterSpacing: "0.16em", textTransform: "uppercase",
+          fontWeight: 600, color: accent, marginBottom: 4 }}>
+          {isAcc ? (node.fraud ? "Compte frauduleux" : "Compte pair") : "Marchand"}
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)" }}>
+          {isAcc ? node.full_name : node.label}
+        </div>
+        {isAcc && (
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+            {ARCH_LABELS[node.archetype] || node.archetype} · {node.province}
+          </div>
+        )}
+        {!isAcc && (
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+            {node.categorie}
+          </div>
+        )}
+      </div>
+
+      {/* Fraud types */}
+      {isAcc && node.fraud && node.fraud_types?.length > 0 && (
+        <div>
+          <SectionLabel>Types de fraude</SectionLabel>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {node.fraud_types.map(ft => (
+              <span key={ft} style={{
+                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4,
+                background: (FRAUD_COLORS[ft] || "#be1f26") + "15",
+                color: FRAUD_COLORS[ft] || "#be1f26",
+                border: `1px solid ${(FRAUD_COLORS[ft] || "#be1f26")}40`,
+              }}>{FRAUD_LABELS[ft] || ft}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Connection stats */}
+      <div>
+        <SectionLabel>Connexions</SectionLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+          <StatMini label="Tx frauduleuses" value={fraudConnEdges.length} alert={fraudConnEdges.length > 0}/>
+          <StatMini label="Tx légitimes"    value={legitConnEdges.length}/>
+          <StatMini label="Nœuds connectés" value={connIds.size}/>
+          {isAcc && <StatMini label="Total tx" value={node.n_tx} mono/>}
+          {!isAcc && <StatMini label="Tx fraude total" value={node.n_fraud_tx} alert={node.n_fraud_tx > 0}/>}
+        </div>
+        {totalFraudMontant > 0 && (
+          <div style={{ marginTop: 7, padding: "6px 9px", borderRadius: 5,
+            background: "rgba(190,31,38,.05)", border: "1px solid rgba(190,31,38,.15)" }}>
+            <div style={{ fontSize: 9, color: "var(--ink-3)", marginBottom: 1 }}>Montant fraudé via ce nœud</div>
+            <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "#be1f26" }}>
+              {fmtCAD(totalFraudMontant)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Connected nodes */}
+      {connNodes.length > 0 && (
+        <div>
+          <SectionLabel>Nœuds directement liés ({connNodes.length})</SectionLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 200, overflowY: "auto" }}>
+            {connNodes.map(n => {
+              const linkEdges = connEdges.filter(e => {
+                const s = e.source?.id ?? e.source;
+                const t = e.target?.id ?? e.target;
+                return (s === nodeId && t === n.id) || (t === nodeId && s === n.id);
+              });
+              const fraudLink = linkEdges.some(e => e.fraud);
+              const montant   = linkEdges.reduce((s, e) => s + (e.montant || 0), 0);
+              const col       = n.type === "merchant" ? "#7c5828" : (n.fraud ? "#be1f26" : "#1e3a5f");
+              return (
+                <div key={n.id} style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "5px 8px", borderRadius: 4,
+                  background: fraudLink ? "rgba(190,31,38,.04)" : "#f7f4ee",
+                  border: `1px solid ${fraudLink ? "rgba(190,31,38,.15)" : "var(--border)"}`,
+                }}>
+                  <svg width={10} height={10}>
+                    {n.type === "merchant"
+                      ? <rect x={1} y={1} width={8} height={8} fill={col} transform="rotate(45 5 5)"/>
+                      : <circle cx={5} cy={5} r={4} fill={col}/>
+                    }
+                  </svg>
+                  <span style={{ fontSize: 11, flex: 1, color: "var(--navy)", overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {n.type === "account" ? n.full_name : n.label}
+                  </span>
+                  <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--ink-3)", flexShrink: 0 }}>
+                    {fmtCAD(montant)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────
+function SectionLabel({ children }) {
+  return (
+    <div style={{ fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
+      color: "var(--ink-3)", fontWeight: 600, marginBottom: 8 }}>
+      {children}
+    </div>
+  );
+}
+function StatMini({ label, value, alert }) {
+  return (
+    <div style={{
+      padding: "6px 8px", borderRadius: 4,
+      background: alert ? "rgba(190,31,38,.05)" : "#f7f4ee",
+      border: `1px solid ${alert ? "rgba(190,31,38,.15)" : "var(--border)"}`,
+    }}>
+      <div style={{ fontSize: 9, color: "var(--ink-3)", marginBottom: 1 }}>{label}</div>
+      <div style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13,
+        color: alert ? "#be1f26" : "var(--navy)" }}>{value ?? "—"}</div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 function GraphView() {
   const svgRef = useRefG(null);
@@ -145,89 +399,141 @@ function GraphView() {
   const [loading, setLoading]           = useStateG(true);
   const [error, setError]               = useStateG(false);
   const [fraudType, setFraudType]       = useStateG("all");
+  const [archetype, setArchetype]       = useStateG("all");
   const [province, setProvince]         = useStateG("all");
+  const [montantMin, setMontantMin]     = useStateG(0);
   const [showPeers, setShowPeers]       = useStateG(true);
+  const [showLegit, setShowLegit]       = useStateG(true);
+  const [maxPeers, setMaxPeers]         = useStateG(25);
   const [selectedNode, setSelectedNode] = useStateG(null);
-  const [counts, setCounts]             = useStateG({ nodes: 0, edges: 0 });
 
   useEffectG(() => {
-    fetch("http://localhost:8000/graph/network", { signal: AbortSignal.timeout(30000) })
+    setLoading(true);
+    setError(false);
+    setSelectedNode(null);
+    fetch(`${API}/graph/network?max_peers=${maxPeers}`, { signal: AbortSignal.timeout(30000) })
       .then(r => r.json())
       .then(data => { setGraphData(data); setLoading(false); })
       .catch(() => { setError(true); setLoading(false); });
-  }, []);
+  }, [maxPeers]);
 
-  useEffectG(() => {
-    if (!graphData || !svgRef.current || typeof d3 === "undefined") return;
+  // Filtered nodes & edges
+  const { filteredNodes, filteredEdges } = useMemoG(() => {
+    if (!graphData) return { filteredNodes: [], filteredEdges: [] };
 
     const nodes = graphData.nodes.filter(n => {
       if (!showPeers && n.type === "account" && !n.fraud) return false;
       if (province !== "all" && n.type === "account" && n.province !== province) return false;
+      if (archetype !== "all" && n.type === "account" && n.archetype !== archetype) return false;
       if (fraudType !== "all" && n.type === "account" && n.fraud && !n.fraud_types?.includes(fraudType)) return false;
       return true;
     }).map(n => ({ ...n }));
 
     const nodeIds = new Set(nodes.map(n => n.id));
-    const edges = graphData.edges
-      .filter(e => nodeIds.has(e.source?.id ?? e.source) && nodeIds.has(e.target?.id ?? e.target))
-      .filter(e => fraudType === "all" || !e.fraud || e.fraud_type === fraudType)
-      .map(e => ({ ...e }));
 
-    setCounts({ nodes: nodes.length, edges: edges.length });
+    const edges = graphData.edges
+      .filter(e => {
+        const s = e.source?.id ?? e.source;
+        const t = e.target?.id ?? e.target;
+        if (!nodeIds.has(s) || !nodeIds.has(t)) return false;
+        if (!showLegit && !e.fraud) return false;
+        if (fraudType !== "all" && e.fraud && e.fraud_type !== fraudType) return false;
+        if (e.fraud && (e.montant || 0) < montantMin) return false;
+        return true;
+      }).map(e => ({ ...e }));
+
+    return { filteredNodes: nodes, filteredEdges: edges };
+  }, [graphData, fraudType, archetype, province, montantMin, showPeers, showLegit]);
+
+  // D3 simulation
+  useEffectG(() => {
+    if (!filteredNodes.length || !svgRef.current || typeof d3 === "undefined") return;
+
+    const highlightIds = selectedNode
+      ? (() => {
+          const id = selectedNode.id;
+          const neighbors = new Set([id]);
+          filteredEdges.forEach(e => {
+            const s = e.source?.id ?? e.source;
+            const t = e.target?.id ?? e.target;
+            if (s === id) neighbors.add(t);
+            if (t === id) neighbors.add(s);
+          });
+          return neighbors;
+        })()
+      : null;
 
     const svg    = d3.select(svgRef.current);
-    const width  = svgRef.current.clientWidth  || 900;
+    const width  = svgRef.current.clientWidth  || 800;
     const height = svgRef.current.clientHeight || 580;
     svg.selectAll("*").remove();
 
     const g = svg.append("g");
-    svg.call(d3.zoom().scaleExtent([0.15, 5]).on("zoom", ev => g.attr("transform", ev.transform)));
+    svg.call(
+      d3.zoom().scaleExtent([0.1, 6])
+        .on("zoom", ev => g.attr("transform", ev.transform))
+    );
+
+    const nodes = filteredNodes;
+    const edges = filteredEdges;
 
     const sim = d3.forceSimulation(nodes)
-      .force("link",    d3.forceLink(edges).id(d => d.id).distance(90).strength(0.4))
-      .force("charge",  d3.forceManyBody().strength(-280))
+      .force("link",    d3.forceLink(edges).id(d => d.id).distance(95).strength(0.35))
+      .force("charge",  d3.forceManyBody().strength(-300))
       .force("center",  d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide().radius(d => d.type === "merchant" ? 26 : 20));
+      .force("collide", d3.forceCollide().radius(d => d.type === "merchant" ? 28 : 22));
 
+    // Edges
     const link = g.append("g").selectAll("line")
       .data(edges).join("line")
-      .attr("stroke",         d => d.fraud ? (FRAUD_COLORS[d.fraud_type] || "#be1f26") : "rgba(30,58,95,.18)")
-      .attr("stroke-width",   d => d.fraud ? 1.8 : 0.8)
-      .attr("stroke-opacity", d => d.fraud ? 0.6 : 1);
+      .attr("stroke",       d => edgeColor(d))
+      .attr("stroke-width", d => edgeWidth(d))
+      .attr("stroke-opacity", d => {
+        if (!highlightIds) return d.fraud ? 0.65 : 0.9;
+        const s = d.source?.id ?? d.source;
+        const t = d.target?.id ?? d.target;
+        return (highlightIds.has(s) && highlightIds.has(t)) ? 0.9 : 0.06;
+      });
 
+    // Nodes
     const node = g.append("g").selectAll("g")
       .data(nodes).join("g")
       .style("cursor", "pointer")
+      .attr("opacity", d => !highlightIds ? 1 : (highlightIds.has(d.id) ? 1 : 0.12))
       .call(d3.drag()
         .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
       )
-      .on("click", (ev, d) => { ev.stopPropagation(); setSelectedNode(d); });
+      .on("click", (ev, d) => {
+        ev.stopPropagation();
+        setSelectedNode(prev => prev?.id === d.id ? null : d);
+      });
 
     svg.on("click", () => setSelectedNode(null));
 
     // Account circles
+    const accR = d => Math.max(8, Math.min(20, (d.n_tx || 100) / 28));
     node.filter(d => d.type === "account")
       .append("circle")
-      .attr("r", d => Math.max(8, Math.min(18, (d.n_tx || 100) / 30)))
-      .attr("fill",         d => d.fraud ? "#be1f26" : "#1e3a5f")
-      .attr("stroke",       d => d.fraud ? "#e85060" : "#4878a8")
+      .attr("r",            accR)
+      .attr("fill",         d => nodeColor(d))
+      .attr("stroke",       d => nodeStroke(d))
       .attr("stroke-width", 1.5);
 
-    // Pulse ring on fraud nodes
+    // Pulse ring on selected fraud
     node.filter(d => d.type === "account" && d.fraud)
       .append("circle")
-      .attr("r", d => Math.max(8, Math.min(18, (d.n_tx || 100) / 30)) + 5)
-      .attr("fill", "none")
-      .attr("stroke", "#be1f26")
-      .attr("stroke-width", 1)
-      .attr("stroke-opacity", 0.22);
+      .attr("r",             d => accR(d) + 5)
+      .attr("fill",          "none")
+      .attr("stroke",        d => nodeColor(d))
+      .attr("stroke-width",  0.8)
+      .attr("stroke-opacity", d => highlightIds?.has(d.id) ? 0.5 : 0.18);
 
     // Merchant diamonds
     node.filter(d => d.type === "merchant")
       .append("rect")
-      .attr("x", -11).attr("y", -11).attr("width", 22).attr("height", 22)
+      .attr("x", -12).attr("y", -12).attr("width", 24).attr("height", 24)
       .attr("transform", "rotate(45)")
       .attr("fill",         "#7c5828")
       .attr("stroke",       "#b08840")
@@ -235,13 +541,17 @@ function GraphView() {
 
     // Labels
     node.append("text")
-      .attr("dy", d => d.type === "merchant" ? 22 : d.fraud ? -16 : -14)
+      .attr("dy", d => d.type === "merchant" ? 24 : -15)
       .attr("text-anchor", "middle")
-      .style("font-size", "9.5px")
-      .style("fill", "var(--ink-2)")
-      .style("font-family", "Inter, sans-serif")
+      .style("font-size",    "9.5px")
+      .style("fill",         "var(--ink-2)")
+      .style("font-family",  "Inter, sans-serif")
+      .style("font-weight",  d => selectedNode?.id === d.id ? "700" : "400")
       .style("pointer-events", "none")
-      .text(d => d.label.length > 13 ? d.label.slice(0, 12) + "…" : d.label);
+      .text(d => {
+        const lbl = d.type === "account" ? d.label : d.label;
+        return lbl.length > 14 ? lbl.slice(0, 13) + "…" : lbl;
+      });
 
     sim.on("tick", () => {
       link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
@@ -250,13 +560,20 @@ function GraphView() {
     });
 
     return () => sim.stop();
-  }, [graphData, fraudType, province, showPeers]);
+  }, [filteredNodes, filteredEdges, selectedNode]);
 
   const selStyle = {
     background: "var(--card)", border: "1px solid var(--border)",
-    color: "var(--navy)", padding: "6px 10px", fontSize: 12,
-    fontFamily: "var(--font)", cursor: "pointer", outline: "none",
+    color: "var(--navy)", padding: "5px 9px", fontSize: 11,
+    fontFamily: "var(--font)", cursor: "pointer", outline: "none", borderRadius: 4,
   };
+  const toggleStyle = (active) => ({
+    fontSize: 11, padding: "5px 10px", borderRadius: 4, cursor: "pointer",
+    fontFamily: "var(--font)", fontWeight: active ? 600 : 400,
+    background: active ? "var(--navy)" : "var(--card)",
+    color: active ? "#fff" : "var(--ink-2)",
+    border: `1px solid ${active ? "var(--navy)" : "var(--border)"}`,
+  });
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -264,69 +581,124 @@ function GraphView() {
       {/* Filter bar */}
       <div style={{
         background: "var(--card)", borderBottom: "1px solid var(--border)",
-        padding: "9px 24px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0,
+        padding: "8px 20px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap",
       }}>
-        <div className="section-label" style={{ marginBottom: 0 }}>
-          <span>Réseau de fraude · Neo4j</span>
+        <div style={{ fontSize: 9, letterSpacing: "0.18em", textTransform: "uppercase",
+          color: "var(--ink-3)", fontWeight: 600, marginRight: 4 }}>
+          Réseau · Neo4j
         </div>
-        <div style={{ flex: 1 }}/>
-        <select value={fraudType} onChange={e => setFraudType(e.target.value)} style={selStyle}>
+
+        <select value={fraudType} onChange={e => { setFraudType(e.target.value); setSelectedNode(null); }} style={selStyle}>
           <option value="all">Tous les types</option>
           {Object.entries(FRAUD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select value={province} onChange={e => setProvince(e.target.value)} style={selStyle}>
-          <option value="all">Toutes provinces</option>
-          {["ON","QC","BC","AB"].map(p => <option key={p} value={p}>{p}</option>)}
+
+        <select value={archetype} onChange={e => { setArchetype(e.target.value); setSelectedNode(null); }} style={selStyle}>
+          <option value="all">Tous les profils</option>
+          {Object.entries(ARCH_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none", fontSize: 12, color: "var(--ink-2)" }}>
-          <input type="checkbox" checked={showPeers} onChange={e => setShowPeers(e.target.checked)}/>
+
+        <select value={province} onChange={e => { setProvince(e.target.value); setSelectedNode(null); }} style={selStyle}>
+          <option value="all">Toutes provinces</option>
+          {["QC","ON","BC","AB"].map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+
+        <select value={montantMin} onChange={e => setMontantMin(Number(e.target.value))} style={selStyle}>
+          <option value={0}>Tous montants</option>
+          <option value={100}>&gt; 100 $</option>
+          <option value={500}>&gt; 500 $</option>
+          <option value={1000}>&gt; 1 000 $</option>
+          <option value={5000}>&gt; 5 000 $</option>
+        </select>
+
+        <div style={{ width: 1, height: 18, background: "var(--border)", margin: "0 2px" }}/>
+
+        <button onClick={() => setShowPeers(v => !v)} style={toggleStyle(showPeers)}>
           Comptes pairs
-        </label>
+        </button>
+        <button onClick={() => setShowLegit(v => !v)} style={toggleStyle(showLegit)}>
+          Arêtes légitimes
+        </button>
+
+        <div style={{ width: 1, height: 18, background: "var(--border)", margin: "0 2px" }}/>
+
+        <select
+          value={maxPeers}
+          onChange={e => setMaxPeers(Number(e.target.value))}
+          style={selStyle}
+          title="Nombre de comptes pairs chargés depuis l'API"
+        >
+          <option value={25}>25 pairs</option>
+          <option value={50}>50 pairs</option>
+          <option value={100}>100 pairs</option>
+          <option value={200}>200 pairs</option>
+          <option value={500}>500 pairs</option>
+        </select>
+
+        <div style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-3)",
+          fontFamily: "var(--mono)" }}>
+          {filteredNodes.length} nœuds · {filteredEdges.length} arêtes
+        </div>
       </div>
 
-      {/* Canvas */}
-      <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#edeae3" }}>
+      {/* Main area */}
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
 
-        {loading && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 10, color: "var(--ink-3)" }}>
-            <div style={{ fontSize: 28, opacity: 0.3 }}>◌</div>
-            <span style={{ fontSize: 12 }}>Chargement du réseau…</span>
-          </div>
-        )}
-        {!loading && error && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 8, color: "var(--ink-3)" }}>
-            <div style={{ fontSize: 28, opacity: 0.3 }}>⊘</div>
-            <div style={{ fontSize: 13, color: "var(--navy)", fontWeight: 600 }}>API non disponible</div>
-            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--mono)", marginTop: 4 }}>
-              uvicorn src.api.main:app --port 8000
+        {/* Graph canvas */}
+        <div style={{ flex: 1, position: "relative", overflow: "hidden", background: "#edeae3" }}>
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+              height: "100%", flexDirection: "column", gap: 10, color: "var(--ink-3)" }}>
+              <div style={{ fontSize: 28, opacity: 0.3 }}>◌</div>
+              <span style={{ fontSize: 12 }}>Chargement du réseau…</span>
             </div>
-          </div>
-        )}
-        {!loading && !error && (
-          <svg ref={svgRef} style={{ width: "100%", height: "100%", display: "block" }}/>
-        )}
+          )}
+          {!loading && error && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+              height: "100%", flexDirection: "column", gap: 8, color: "var(--ink-3)" }}>
+              <div style={{ fontSize: 28, opacity: 0.3 }}>⊘</div>
+              <div style={{ fontSize: 13, color: "var(--navy)", fontWeight: 600 }}>API non disponible</div>
+              <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--mono)", marginTop: 4 }}>
+                uvicorn src.api.main:app --port 8000
+              </div>
+            </div>
+          )}
+          {!loading && !error && (
+            <svg ref={svgRef} style={{ width: "100%", height: "100%", display: "block" }}/>
+          )}
+          {graphData && !loading && <Legend/>}
+          {selectedNode && (
+            <div style={{
+              position: "absolute", top: 14, right: 14,
+              fontSize: 11, color: "var(--ink-3)",
+              background: "var(--card)", border: "1px solid var(--border)",
+              padding: "4px 10px", borderRadius: 4, cursor: "pointer",
+            }} onClick={() => setSelectedNode(null)}>
+              × Désélectionner
+            </div>
+          )}
+        </div>
 
-        {graphData && !loading && <Legend/>}
-        {selectedNode && <NodePanel node={selectedNode} onClose={() => setSelectedNode(null)}/>}
-
-        {graphData && !loading && (
-          <div style={{
-            position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
-            background: "var(--card)", border: "1px solid var(--border)",
-            padding: "5px 18px", display: "flex", gap: 16, alignItems: "center",
-          }}>
-            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
-              <strong style={{ fontFamily: "var(--mono)", color: "var(--navy)" }}>{counts.nodes}</strong> nœuds
-            </span>
-            <span style={{ width: 1, height: 10, background: "var(--border)" }}/>
-            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
-              <strong style={{ fontFamily: "var(--mono)", color: "var(--navy)" }}>{counts.edges}</strong> relations
-            </span>
-            <span style={{ width: 1, height: 10, background: "var(--border)" }}/>
-            <span style={{ fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.05em" }}>Drag · Scroll pour zoomer</span>
-          </div>
-        )}
-
+        {/* Stats / detail panel */}
+        <div style={{
+          width: 260, flexShrink: 0,
+          borderLeft: "1px solid var(--border)",
+          background: "var(--card)",
+          overflowY: "auto",
+          padding: "16px 14px",
+        }}>
+          {graphData && !loading
+            ? <StatsPanel
+                graphData={graphData}
+                selectedNode={selectedNode}
+                filteredNodes={filteredNodes}
+                filteredEdges={filteredEdges}
+              />
+            : <div style={{ fontSize: 12, color: "var(--ink-3)", textAlign: "center", marginTop: 40 }}>
+                Chargement…
+              </div>
+          }
+        </div>
       </div>
     </div>
   );

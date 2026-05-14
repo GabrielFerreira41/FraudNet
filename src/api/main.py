@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from src.api.schemas import (
     AgentScores, AnalyzeAgentScores, AnalyzeRequest, AnalyzeResponse,
@@ -21,6 +22,7 @@ from src.api.schemas import (
     ScoringResponse, StatsResponse,
 )
 from src.api.predictor import FraudPredictor
+from src.api import generator as gen_module
 
 _predictor: FraudPredictor | None = None
 
@@ -218,14 +220,27 @@ def get_account(account_id: str):
 # Graph — réseau de fraude
 # ---------------------------------------------------------------------------
 
+@app.get("/stats/dataset", tags=["Système"])
+def stats_dataset(
+    archetype:  str = Query(default="all"),
+    province:   str = Query(default="all"),
+    fraud_type: str = Query(default="all"),
+):
+    """Agrégations filtrées pour la vue exploration de données."""
+    return _get().dataset_stats(archetype=archetype, province=province, fraud_type=fraud_type)
+
+
 @app.get("/graph/network", tags=["Graph"])
-def graph_network():
+def graph_network(
+    max_peers: int = Query(default=25, ge=5, le=500,
+                           description="Nombre max de comptes pairs à inclure"),
+):
     """
     Réseau de fraude pour visualisation D3.
     Nœuds : comptes frauduleux + pairs légitimes + marchands impliqués.
     Arêtes : transactions frauduleuses et légitimes vers les marchands.
     """
-    return _get().graph_network()
+    return _get().graph_network(max_peers=max_peers)
 
 
 # ---------------------------------------------------------------------------
@@ -322,3 +337,62 @@ def get_report(
         return report
     except (EnvironmentError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Génération de données
+# ---------------------------------------------------------------------------
+
+class GenerateRequest(BaseModel):
+    n_accounts:        int   = 500
+    weeks:             int   = 13
+    seed:              int   = 42
+    fraud_rate:        float = 0.03
+    archetype_weights: dict[str, float] | None = None
+    fraud_types:       dict[str, float] | None = None
+    destination:       str   = "new"   # "new" | "merge"
+    dataset_name:      str   = ""
+
+
+@app.post("/generate/start", tags=["Génération"])
+def generate_start(req: GenerateRequest):
+    """Lance une génération de données en arrière-plan. Retourne un job_id."""
+    job_id = gen_module.start_generation(req.model_dump())
+    return {"job_id": job_id}
+
+
+@app.get("/generate/status/{job_id}", tags=["Génération"])
+def generate_status(job_id: str):
+    """Sonde l'avancement d'un job de génération."""
+    job = gen_module.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} introuvable")
+    return {
+        "id":       job["id"],
+        "status":   job["status"],
+        "step":     job["step"],
+        "progress": job["progress"],
+        "log":      job["log"],
+        "result":   job["result"],
+        "error":    job["error"],
+    }
+
+
+@app.get("/generate/datasets", tags=["Génération"])
+def generate_datasets():
+    """Liste les datasets disponibles dans data/generated/."""
+    return gen_module.list_datasets()
+
+
+@app.post("/generate/reload", tags=["Génération"])
+def generate_reload():
+    """Recharge le prédicateur MARS avec le dataset principal mis à jour."""
+    global _predictor
+    _predictor = FraudPredictor()
+    s = _predictor.stats
+    return {
+        "status": "reloaded",
+        "transactions_indexed": s["transactions_indexed"],
+        "accounts_indexed":     s["accounts_indexed"],
+        "fraud_rate":           s["fraud_rate"],
+    }

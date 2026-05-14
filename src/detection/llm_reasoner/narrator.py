@@ -9,6 +9,7 @@ import os
 
 import pandas as pd
 from dotenv import load_dotenv
+from mistralai.client import Mistral
 
 load_dotenv()
 
@@ -125,8 +126,6 @@ Règles :
 
 
 def _mistral_narrative(tx_input: dict, mars_result: dict, accounts_df: pd.DataFrame | None) -> dict:
-    from mistralai import Mistral
-
     account_id = tx_input.get("account_id")
     acc_info   = {}
     if account_id is not None and accounts_df is not None:

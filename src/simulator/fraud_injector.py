@@ -238,12 +238,26 @@ def _structuration(df: pd.DataFrame, account_ids: list[str], rng: np.random.Gene
 # Orchestrateur
 # ---------------------------------------------------------------------------
 
+DEFAULT_SCENARIO_SPLIT = {
+    "carte_volee":      0.30,
+    "test_carte":       0.25,
+    "prise_de_compte":  0.20,
+    "reseau_mules":     0.15,
+    "structuration":    0.10,
+}
+
+
 def inject_fraud(
     transactions_path: Path,
     accounts_path: Path,
     fraud_rate: float,
     seed: int,
+    fraud_types: dict[str, float] | None = None,
 ) -> pd.DataFrame:
+    """
+    fraud_types: dict mapping scenario name → relative weight.
+    If None, uses DEFAULT_SCENARIO_SPLIT.
+    """
     rng = np.random.default_rng(seed)
 
     df   = pd.read_parquet(transactions_path)
@@ -254,18 +268,13 @@ def inject_fraud(
     all_account_ids = df["account_id"].unique().tolist()
     vulnerable_ids  = acc[acc["est_vulnerabilite"]]["account_id"].tolist()
 
-    # Nombre de comptes ciblés par scénario
-    n_total = len(all_account_ids)
+    n_total  = len(all_account_ids)
     n_fraude = max(1, int(n_total * fraud_rate))
 
-    # Distribution des scénarios
-    scenario_split = {
-        "carte_volee":      0.30,
-        "test_carte":       0.25,
-        "prise_de_compte":  0.20,
-        "reseau_mules":     0.15,
-        "structuration":    0.10,
-    }
+    # Build normalised scenario split from caller or default
+    raw_split = fraud_types if fraud_types else DEFAULT_SCENARIO_SPLIT
+    total_w   = sum(raw_split.values()) or 1.0
+    scenario_split = {k: v / total_w for k, v in raw_split.items() if v > 0}
 
     fraud_frames: list[pd.DataFrame] = []
 

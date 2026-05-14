@@ -20,8 +20,8 @@
 <script type="text/babel" src="PitchView.jsx"></script>
 <script type="text/babel" src="Dashboard.jsx"></script>
 <script type="text/babel" src="GraphView.jsx"></script>
-
 <script type="text/babel" src="LiveOps.jsx"></script>
+<script type="text/babel" src="DataGen.jsx"></script>
 <!-- Future views (uncomment when ready):
 <script type="text/babel" src="ModelStats.jsx"></script>
 -->
@@ -30,11 +30,12 @@
 const { useState, useEffect } = React;
 
 const VIEWS = [
-  { id: "pitch",     label: "Vue Projet",   ready: true  },
-  { id: "dashboard", label: "Vue Données",  ready: true  },
-  { id: "graph",     label: "Réseau Neo4j", ready: true  },
+  { id: "pitch",     label: "Vue Projet",    ready: true  },
+  { id: "dashboard", label: "Vue Données",   ready: true  },
+  { id: "graph",     label: "Réseau Neo4j",  ready: true  },
   { id: "live",      label: "MARS Analyzer", ready: true  },
-  { id: "model",     label: "Performance",  ready: false },
+  { id: "datagen",   label: "Générateur",    ready: true  },
+  { id: "model",     label: "Performance",   ready: false },
 ];
 
 function ApiPill() {
@@ -92,7 +93,7 @@ function TopBar({ view, setView }) {
 
 function App() {
   const [view, setView] = useState("pitch");
-  const isFixed = view === "graph" || view === "live";
+  const isFixed = view === "graph" || view === "live" || view === "datagen";
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <TopBar view={view} setView={setView}/>
@@ -101,13 +102,14 @@ function App() {
         {view === "dashboard" && <Dashboard/>}
         {view === "graph"     && <GraphView/>}
         {view === "live"      && <LiveOps/>}
+        {view === "datagen"   && <DataGen/>}
       </div>
     </div>
   );
 }
 
 function mount() {
-  if (!window.PitchView || !window.Dashboard || !window.GraphView || !window.LiveOps) {
+  if (!window.PitchView || !window.Dashboard || !window.GraphView || !window.LiveOps || !window.DataGen) {
     setTimeout(mount, 30); return;
   }
   ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
