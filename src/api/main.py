@@ -191,6 +191,60 @@ def metrics():
 # Admin — comptes
 # ---------------------------------------------------------------------------
 
+@app.get("/mlflow/runs", tags=["Système"])
+def mlflow_runs():
+    """Historique des runs MLflow (evaluate) pour la vue Performance."""
+    try:
+        import mlflow
+        import pandas as pd
+        df = mlflow.search_runs(
+            experiment_names=["fraudnet-baseline"],
+            order_by=["start_time ASC"],
+        )
+        if df.empty:
+            return []
+        result = []
+        for _, row in df.iterrows():
+            if row.get("tags.mlflow.runName") != "evaluate":
+                continue
+            metrics = {
+                col[len("metrics."):]: float(row[col])
+                for col in df.columns
+                if col.startswith("metrics.") and pd.notna(row[col])
+            }
+            result.append({
+                "run_id":     row["run_id"],
+                "start_time": row["start_time"].isoformat() if pd.notna(row.get("start_time")) else None,
+                **metrics,
+            })
+        return result
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Breach Radar — surveillance des fuites de données mondiales
+# ---------------------------------------------------------------------------
+
+@app.delete("/breach-intel/clear", tags=["Breach Radar"])
+def breach_clear():
+    """Supprime tous les incidents de la base breach_events."""
+    from src.api.breach_store import clear_breaches
+    n = clear_breaches()
+    return {"deleted": n}
+
+
+@app.get("/breach-scan", tags=["Breach Radar"])
+async def breach_scan():
+    """
+    Scanne les flux RSS de cybersécurité (BleepingComputer, TheHackerNews) et
+    utilise Claude Haiku pour extraire les fuites de données structurées avec
+    coordonnées géographiques.
+    """
+    from src.api.breach_scanner import scan_breaches
+    breaches = await scan_breaches()
+    return {"breaches": breaches, "count": len(breaches)}
+
 @app.get("/accounts", tags=["Admin"])
 def list_accounts():
     """Liste des 1 000 comptes avec niveau de risque et statistiques agrégées."""
@@ -225,22 +279,26 @@ def stats_dataset(
     archetype:  str = Query(default="all"),
     province:   str = Query(default="all"),
     fraud_type: str = Query(default="all"),
+    dataset:    str = Query(default="main"),
 ):
     """Agrégations filtrées pour la vue exploration de données."""
-    return _get().dataset_stats(archetype=archetype, province=province, fraud_type=fraud_type)
+    return _get().dataset_stats(
+        archetype=archetype, province=province,
+        fraud_type=fraud_type, dataset=dataset,
+    )
 
 
 @app.get("/graph/network", tags=["Graph"])
 def graph_network(
-    max_peers: int = Query(default=25, ge=5, le=500,
-                           description="Nombre max de comptes pairs à inclure"),
+    max_peers: int = Query(default=25, ge=0,  le=500, description="Nombre max de comptes pairs"),
+    max_fraud: int = Query(default=50, ge=1,  le=500, description="Nombre max de comptes frauduleux"),
 ):
     """
     Réseau de fraude pour visualisation D3.
     Nœuds : comptes frauduleux + pairs légitimes + marchands impliqués.
     Arêtes : transactions frauduleuses et légitimes vers les marchands.
     """
-    return _get().graph_network(max_peers=max_peers)
+    return _get().graph_network(max_peers=max_peers, max_fraud=max_fraud)
 
 
 # ---------------------------------------------------------------------------

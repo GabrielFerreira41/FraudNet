@@ -108,11 +108,22 @@ def _generer_transactions_compte(account: pd.Series, weeks: int, rng: np.random.
             mu = np.log(max(montant_moyen, 1.0))
             montant = float(round(max(1.0, rng.lognormal(mu, sigma_log)), 2))
 
-            # Device : principal 85% du temps, secondaire sinon
-            if len(devices) > 1 and rng.random() < 0.15:
+            # Device : principal 83%, secondaire enregistré 15%, non-enregistré 2%
+            if rng.random() < 0.02:
+                device = "tablette"   # appareil emprunté / oublié — crée du bruit réaliste
+            elif len(devices) > 1 and rng.random() < 0.15:
                 device = str(rng.choice([d for d in devices if d != device_principal]))
             else:
                 device = device_principal
+
+            # Heure : 97% dans le profil, 3% légèrement hors horaires (réaliste)
+            if rng.random() < 0.03:
+                hors = [h for h in range(6, 24) if h not in heures_dispo]
+                if hors:
+                    heure = int(rng.choice(hors[:4]))   # juste en dehors
+            minute  = int(rng.integers(0, 60))
+            seconde = int(rng.integers(0, 60))
+            timestamp = date_tx.replace(hour=heure, minute=minute, second=seconde)
 
             # Ville : 95% ville du compte, 5% ailleurs (déplacement)
             if rng.random() < 0.05:

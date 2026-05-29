@@ -7,12 +7,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import mlflow
 import numpy as np
 import pandas as pd
 import shap
 from sklearn.metrics import (
-    classification_report, confusion_matrix,
+    classification_report, confusion_matrix, f1_score,
     precision_recall_curve, roc_auc_score, average_precision_score,
+    precision_score, recall_score,
 )
 
 from src.detection.baseline.agent import load_data, load_model, _xy, FEATURE_COLS, MODEL_PATH
@@ -189,15 +191,35 @@ def main() -> None:
     report_path.write_text(report)
     print(f"\n✓ Rapport → {report_path}")
 
-    plot_pr_curve(y_test.values, y_scores, threshold, REPORTS_DIR / "baseline_pr_curve.png")
+    pr_path  = REPORTS_DIR / "baseline_pr_curve.png"
+    shap_path = REPORTS_DIR / "baseline_shap.png"
+    fi_path  = REPORTS_DIR / "baseline_feature_importance.png"
 
-    # SHAP sur un échantillon (les fraudes + sample légitimes pour équilibrer)
-    fraud_idx = X_test[y_test.values == 1].index
-    legit_sample = X_test[y_test.values == 0].sample(min(500, (y_test==0).sum()), random_state=42)
-    shap_sample = pd.concat([X_test.loc[fraud_idx], legit_sample])
-    plot_shap(model, shap_sample, REPORTS_DIR / "baseline_shap.png")
+    plot_pr_curve(y_test.values, y_scores, threshold, pr_path)
 
-    plot_feature_importance(model, REPORTS_DIR / "baseline_feature_importance.png")
+    fraud_idx    = X_test[y_test.values == 1].index
+    legit_sample = X_test[y_test.values == 0].sample(min(500, (y_test == 0).sum()), random_state=42)
+    shap_sample  = pd.concat([X_test.loc[fraud_idx], legit_sample])
+    plot_shap(model, shap_sample, shap_path)
+    plot_feature_importance(model, fi_path)
+
+    # ── MLflow : log métriques + artefacts dans l'experiment existant ──────
+    y_pred = (y_scores >= threshold).astype(int)
+    mlflow.set_experiment("fraudnet-baseline")
+    with mlflow.start_run(run_name="evaluate"):
+        mlflow.log_metrics({
+            "threshold":   round(float(threshold), 4),
+            "auc_roc":     round(float(roc_auc_score(y_test.values, y_scores)), 4),
+            "auc_pr":      round(float(average_precision_score(y_test.values, y_scores)), 4),
+            "precision":   round(float(precision_score(y_test.values, y_pred, zero_division=0)), 4),
+            "recall":      round(float(recall_score(y_test.values, y_pred)), 4),
+            "f1":          round(float(f1_score(y_test.values, y_pred, zero_division=0)), 4),
+            "n_fraud_test": int(y_test.sum()),
+            "n_test":       len(y_test),
+        })
+        for path in [report_path, pr_path, shap_path, fi_path]:
+            mlflow.log_artifact(str(path))
+        print("✓ Métriques et artefacts loggés dans MLflow")
 
 
 if __name__ == "__main__":

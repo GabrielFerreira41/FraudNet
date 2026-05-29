@@ -95,6 +95,7 @@ def _rule_based_narrative(tx_input: dict, mars_result: dict) -> dict:
         "risk_factors":         factors,
         "fraud_type_suspected": fraud_type,
         "recommended_action":   action,
+        "threat_intel_used":    False,
         "source":               "rule_based",
     }
 
@@ -104,7 +105,8 @@ def _rule_based_narrative(tx_input: dict, mars_result: dict) -> dict:
 SYSTEM_PROMPT = """\
 Tu es un analyste expert en fraude bancaire pour une institution financière canadienne.
 Tu reçois une fiche JSON décrivant une transaction, les scores de 4 agents ML (MARS),
-et les facteurs de risque identifiés.
+les facteurs de risque identifiés, et — si disponible — un bloc 'threat_intelligence'
+listant les fuites financières mondiales récentes détectées par l'Agent Threat Intel.
 
 Produis un rapport d'analyse en JSON avec exactement ces champs :
 {
@@ -115,14 +117,51 @@ Produis un rapport d'analyse en JSON avec exactement ces champs :
   "fraud_type_suspected": "carte_volee" | "test_carte" | "prise_de_compte"
                         | "reseau_mules" | "structuration" | null,
   "recommended_action": "BLOCK" | "MANUAL_REVIEW" | "APPROVE",
+  "threat_intel_used": true | false,
   "source": "mistral"
 }
 
 Règles :
 - Sois concis et factuel. Cite des chiffres précis du contexte.
 - Si les scores ML se contredisent, explique lequel tu pèses davantage et pourquoi.
+- Si 'threat_intelligence' est présent et threat_score > 0.3 : mentionne l'incident
+  le plus pertinent dans 'justification' et durcis légèrement ta recommandation.
+  Pose 'threat_intel_used' à true si tu en as tenu compte, false sinon.
 - Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.
 """
+
+
+def _infer_fraud_type(mars_result: dict) -> str | None:
+    """Déduit le type de fraude probable depuis les scores agents."""
+    agents = mars_result.get("agent_scores", {})
+    feat   = mars_result.get("features", {})
+    g1, g2, g3 = agents.get("g1_device", 0), agents.get("g2_merchant", 0), agents.get("g3_temporal", 0)
+    if g1 > 0.75 and g3 > 0.65:
+        return "reseau_mules"
+    if g2 > 0.75 and g3 > 0.65:
+        return "test_carte"
+    if g2 > 0.75:
+        return "carte_volee"
+    if feat.get("nouveau_device") and feat.get("nouveau_commercant"):
+        return "prise_de_compte"
+    if feat.get("n_comptes_par_device", 0) > 10:
+        return "structuration"
+    return None
+
+
+def _inject_threat_context(context: dict, mars_result: dict) -> None:
+    """Injecte le bloc threat_intelligence dans le contexte si des breaches sont disponibles."""
+    try:
+        from src.detection.llm_reasoner.breach_context import get_threat_context
+        ti = get_threat_context(fraud_type=_infer_fraud_type(mars_result))
+        if ti["threat_score"] > 0:
+            context["threat_intelligence"] = {
+                "threat_score": ti["threat_score"],
+                "n_incidents":  len(ti["active_breaches"]),
+                "summary":      ti["summary"],
+            }
+    except (ImportError, OSError, ValueError):
+        pass
 
 
 def _mistral_narrative(tx_input: dict, mars_result: dict, accounts_df: pd.DataFrame | None) -> dict:
@@ -166,6 +205,9 @@ def _mistral_narrative(tx_input: dict, mars_result: dict, accounts_df: pd.DataFr
         },
     }
 
+    # Enrichissement threat intelligence (breach context)
+    _inject_threat_context(context, mars_result)
+
     client   = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
     response = client.chat.complete(
         model          = "mistral-large-latest",
@@ -204,8 +246,7 @@ def narrate(
     if api_key:
         try:
             return _mistral_narrative(tx_input, mars_result, accounts_df)
-        except Exception as e:
-            # Fallback silencieux si l'API échoue
+        except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError) as e:
             result = _rule_based_narrative(tx_input, mars_result)
             result["justification"] += f" (Mistral indisponible : {e})"
             return result

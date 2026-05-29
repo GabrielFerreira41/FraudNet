@@ -97,6 +97,7 @@ def build_context(
         ],
     }
 
+    suspected_fraud_type: str | None = None
     if mars_scores is not None:
         m = mars_scores[mars_scores["transaction_id"] == transaction_id]
         if not m.empty:
@@ -108,6 +109,21 @@ def build_context(
                 "score_graph":    float(m["score_graph"]),
                 "contradiction":  bool(m["contradiction"]),
             }
+            if "fraud_type" in m.index and pd.notna(m["fraud_type"]):
+                suspected_fraud_type = str(m["fraud_type"])
+
+    # Enrichissement threat intelligence
+    try:
+        from src.detection.llm_reasoner.breach_context import get_threat_context
+        ti = get_threat_context(fraud_type=suspected_fraud_type)
+        if ti["threat_score"] > 0:
+            context["threat_intelligence"] = {
+                "threat_score": ti["threat_score"],
+                "n_incidents":  len(ti["active_breaches"]),
+                "summary":      ti["summary"],
+            }
+    except Exception:
+        pass
 
     return context
 
@@ -119,7 +135,9 @@ def build_context(
 SYSTEM_PROMPT = (
     "Tu es un analyste expert en fraude bancaire pour une institution financière canadienne.\n"
     "Tu reçois une fiche contextuelle JSON d'une transaction suspecte : profil du client,\n"
-    "habitudes comportementales, transactions récentes, et scores de plusieurs agents ML.\n"
+    "habitudes comportementales, transactions récentes, scores de plusieurs agents ML,\n"
+    "et — si disponible — un bloc 'threat_intelligence' listant les fuites de données\n"
+    "financières mondiales récentes détectées par l'Agent Threat Intel.\n"
     "\n"
     "Produis un rapport d'analyse structuré en JSON avec exactement ces champs :\n"
     "\n"
@@ -132,6 +150,7 @@ SYSTEM_PROMPT = (
     '  "recommended_action": "BLOCK" | "MANUAL_REVIEW" | "APPROVE",\n'
     '  "fraud_type_suspected": "carte_volee" | "test_carte" | "prise_de_compte"\n'
     '                       | "reseau_mules" | "structuration" | null,\n'
+    '  "threat_intel_used": true | false,\n'
     '  "missing_context": ["informations manquantes pour trancher"]\n'
     "}\n"
     "\n"
@@ -139,6 +158,11 @@ SYSTEM_PROMPT = (
     "- Sois concis et factuel. Cite des chiffres précis du contexte.\n"
     "- Si les scores ML se contredisent, explique lequel tu pèses davantage et pourquoi.\n"
     "- Un compte récent sans historique justifie plus de vigilance (cold-start).\n"
+    "- Si 'threat_intelligence' est présent et threat_score > 0.3 : mentionne l'incident\n"
+    "  le plus pertinent dans 'justification' et élève le risk_score de 5-15 points.\n"
+    "  Une fuite de credentials récente augmente la probabilité de prise de compte.\n"
+    "  Un vol de données de cartes augmente la probabilité de carte_volee / test_carte.\n"
+    "  Pose 'threat_intel_used' à true si tu en as tenu compte, false sinon.\n"
     "- Réponds UNIQUEMENT avec le JSON, sans texte avant ou après."
 )
 

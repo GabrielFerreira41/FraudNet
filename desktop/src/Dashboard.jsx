@@ -175,7 +175,7 @@ function TimelineChart({ data, onTip }) {
       .curve(d3.curveMonotoneX);
     g.append("path").datum(data).attr("fill","none").attr("stroke","#be1f26").attr("stroke-width",2).attr("d",line);
 
-    const dots = g.selectAll(".dot").data(data).join("circle")
+    g.selectAll(".dot").data(data).join("circle")
       .attr("cx", d => x(d.week) + x.bandwidth()/2)
       .attr("cy", d => yFraud(d.n_fraud))
       .attr("r", d => d.n_fraud > 0 ? 4 : 2)
@@ -532,7 +532,6 @@ function CanadaMap({ data, onTip }) {
       data.forEach(pd => {
         const c = centroids[pd.province];
         if (!c) return;
-        const r = rTx(pd.n_tx);
         svg.append('text')
           .attr('x', c[0]).attr('y', c[1] + 4)
           .attr('text-anchor', 'middle')
@@ -929,6 +928,18 @@ function CategoryChart({ data, onTip }) {
   );
 }
 
+// ── Section divider ───────────────────────────────────────────────────────────
+
+function SectionDivider({ label }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:6 }}>
+      <span style={{ fontSize:9, letterSpacing:"0.12em", color:"#8596af", fontWeight:700,
+        textTransform:"uppercase", whiteSpace:"nowrap" }}>{label}</span>
+      <div style={{ flex:1, height:1, background:"var(--border)" }}/>
+    </div>
+  );
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 function Dashboard() {
@@ -1016,9 +1027,9 @@ function Dashboard() {
 
       {/* Scrollable content */}
       <div style={{ flex:1, overflowY:"auto", padding:"18px 24px",
-        display:"flex", flexDirection:"column", gap:14 }}>
+        display:"flex", flexDirection:"column", gap:10 }}>
 
-        {/* Row 1 — KPIs */}
+        {/* KPIs */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8 }}>
           <KpiCard loading={loading} value={fmtNum(kpis?.n_transactions)} label="Transactions"
             sub={`${kpis?.n_accounts ?? "—"} comptes`}/>
@@ -1040,8 +1051,10 @@ function Dashboard() {
               : "13 semaines"}/>
         </div>
 
-        {/* Row 2 — Timeline + Donut */}
-        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:14 }}>
+        {/* — Activité transactionnelle ——————————————————————————————————————— */}
+        <SectionDivider label="Activité transactionnelle"/>
+
+        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12 }}>
           <ChartCard title="Volume hebdomadaire & fraudes" sub="barres = tx · ligne rouge = fraudes">
             {loading ? <Skeleton h={110}/> : <TimelineChart data={stats?.weekly} onTip={setTip}/>}
           </ChartCard>
@@ -1050,50 +1063,52 @@ function Dashboard() {
           </ChartCard>
         </div>
 
-        {/* Row 3 — Age groups + Heatmap */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1.4fr", gap:14 }}>
-          <ChartCard title="Par tranche d'âge" sub="volume · taux de fraude">
-            {loading ? <Skeleton h={150}/> : <AgeGroupChart data={stats?.by_age_group} onTip={setTip}/>}
+        {/* — Comportement & risques ————————————————————————————————————————— */}
+        <SectionDivider label="Comportement & risques"/>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1.4fr", gap:12 }}>
+          <ChartCard title="Distribution horaire" sub="24h · volume et fraudes">
+            {loading ? <Skeleton h={100}/> : <HourlyChart data={stats?.hourly} onTip={setTip}/>}
+          </ChartCard>
+          <ChartCard title="Distribution des montants" sub="% tx vs % fraudes">
+            {loading ? <Skeleton h={100}/> : <AmountChart data={stats?.by_amount} onTip={setTip}/>}
           </ChartCard>
           <ChartCard title="Heatmap fraude" sub="type × profil client">
             {loading ? <Skeleton h={150}/> : <FraudHeatmap data={stats?.heatmap} onTip={setTip}/>}
           </ChartCard>
         </div>
 
-        {/* Row 4 — Canada map + Device */}
-        <div style={{ display:"grid", gridTemplateColumns:"3fr 1fr", gap:14 }}>
+        {/* — Géographie canadienne —————————————————————————————————————————— */}
+        <SectionDivider label="Géographie canadienne"/>
+
+        <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12, alignItems:"start" }}>
           <ChartCard title="Carte du Canada" sub="cercles bleus = volume tx · cercles rouges = fraudes">
             {loading ? <Skeleton h={280}/> : <CanadaMap data={stats?.by_province} onTip={setTip}/>}
           </ChartCard>
-          <ChartCard title="Par appareil">
-            {loading ? <Skeleton h={150}/> : <DevicePie data={stats?.by_device} onTip={setTip}/>}
-          </ChartCard>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <ChartCard title="Par tranche d'âge" sub="volume · taux de fraude">
+              {loading ? <Skeleton h={150}/> : <AgeGroupChart data={stats?.by_age_group} onTip={setTip}/>}
+            </ChartCard>
+            <ChartCard title="Par appareil">
+              {loading ? <Skeleton h={110}/> : <DevicePie data={stats?.by_device} onTip={setTip}/>}
+            </ChartCard>
+          </div>
         </div>
 
-        {/* Row 5 — Hourly + Amount */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-          <ChartCard title="Distribution horaire" sub="24h · volume et fraudes">
-            {loading ? <Skeleton/> : <HourlyChart data={stats?.hourly} onTip={setTip}/>}
-          </ChartCard>
-          <ChartCard title="Distribution des montants" sub="% tx vs % fraudes">
-            {loading ? <Skeleton/> : <AmountChart data={stats?.by_amount} onTip={setTip}/>}
-          </ChartCard>
-        </div>
+        {/* — Profils & marchands ————————————————————————————————————————————— */}
+        <SectionDivider label="Profils & marchands"/>
 
-        {/* Row 6 — Archetypes + Merchants */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1.2fr", gap:12 }}>
           <ChartCard title="Profils clients" sub="volume · taux de fraude">
             {loading ? <Skeleton h={140}/> : <ArchetypeChart data={stats?.by_archetype} onTip={setTip}/>}
           </ChartCard>
           <ChartCard title="Top marchands à risque" sub="volume + fraudes détectées">
             {loading ? <Skeleton h={140}/> : <MerchantChart data={stats?.by_merchant} onTip={setTip}/>}
           </ChartCard>
+          <ChartCard title="Par catégorie marchande" sub="volume tx + cas de fraude">
+            {loading ? <Skeleton h={140}/> : <CategoryChart data={stats?.by_category} onTip={setTip}/>}
+          </ChartCard>
         </div>
-
-        {/* Row 7 — Category */}
-        <ChartCard title="Par catégorie marchande" sub="volume tx + cas de fraude">
-          {loading ? <Skeleton h={120}/> : <CategoryChart data={stats?.by_category} onTip={setTip}/>}
-        </ChartCard>
 
       </div>
     </div>

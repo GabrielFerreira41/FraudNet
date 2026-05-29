@@ -282,10 +282,15 @@ class FraudPredictor:
             "transactions":   transactions,
         }
 
-    def graph_network(self, max_peers: int = 25) -> dict:
+    def graph_network(self, max_peers: int = 25, max_fraud: int = 50) -> dict:
         """Fraud network graph for D3 (accounts + merchants + edges)."""
-        fraud_tx    = self.features_df[self.features_df["is_fraud"]].copy()
-        fraud_accs  = set(fraud_tx["account_id"].unique())
+        fraud_tx   = self.features_df[self.features_df["is_fraud"]].copy()
+
+        # Limit fraud accounts to the top-N by number of fraud transactions
+        fraud_acc_counts = fraud_tx.groupby("account_id")["transaction_id"].count()
+        fraud_accs = set(fraud_acc_counts.nlargest(max_fraud).index)
+        fraud_tx   = fraud_tx[fraud_tx["account_id"].isin(fraud_accs)]
+
         fraud_merch = set(fraud_tx["commercant"].unique())
 
         # Top-N legit accounts that visited fraud merchants (ordered by visit frequency)
@@ -373,17 +378,33 @@ class FraudPredictor:
 
     def dataset_stats(
         self,
-        archetype: str = "all",
-        province:  str = "all",
+        archetype:  str = "all",
+        province:   str = "all",
         fraud_type: str = "all",
+        dataset:    str = "main",
     ) -> dict:
         """Agrégations filtrées pour la vue exploration de données."""
-        df = self.features_df.copy()
+        if dataset == "main" or not dataset:
+            features_df = self.features_df
+            accounts_df = self.accounts_df
+        else:
+            base = Path("data/generated") / dataset
+            feat_path = base / "features.parquet"
+            acc_path  = base / "accounts.parquet"
+            if feat_path.exists() and acc_path.exists():
+                features_df = pd.read_parquet(feat_path)
+                features_df["timestamp"] = pd.to_datetime(features_df["timestamp"])
+                accounts_df = pd.read_parquet(acc_path)
+            else:
+                features_df = self.features_df
+                accounts_df = self.accounts_df
+
+        df = features_df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"])
 
         # Merge province depuis accounts
         df = df.merge(
-            self.accounts_df[["account_id", "province"]],
+            accounts_df[["account_id", "province"]],
             on="account_id", how="left",
         )
 
@@ -516,7 +537,7 @@ class FraudPredictor:
 
         # ── Par tranche d'âge ──
         from datetime import date as _date
-        acc_copy = self.accounts_df[["account_id", "date_naissance"]].copy()
+        acc_copy = accounts_df[["account_id", "date_naissance"]].copy()
         acc_copy["age"] = pd.to_datetime(acc_copy["date_naissance"]).apply(
             lambda d: (_date.today() - d.date()).days // 365
         )

@@ -8,6 +8,7 @@ import pickle
 from pathlib import Path
 
 import lightgbm as lgb
+import mlflow
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -54,7 +55,12 @@ def _xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
 # Entraînement
 # ---------------------------------------------------------------------------
 
-def train(features_path: Path = FEATURES_PATH, model_path: Path = MODEL_PATH) -> lgb.Booster:
+def train(
+    features_path: Path = FEATURES_PATH,
+    model_path: Path = MODEL_PATH,
+    run_name: str = "baseline",
+    extra_params: dict | None = None,
+) -> lgb.Booster:
     print("Chargement des données (split temporel)...")
     train_df, test_df = load_data(features_path)
 
@@ -70,33 +76,54 @@ def train(features_path: Path = FEATURES_PATH, model_path: Path = MODEL_PATH) ->
     dval   = lgb.Dataset(X_test,  label=y_test,  reference=dtrain)
 
     params = {
-        "objective":        "binary",
-        "metric":           ["auc", "binary_logloss"],
-        "scale_pos_weight": n_neg / max(n_pos, 1),
-        "learning_rate":    0.05,
-        "num_leaves":       31,
+        "objective":         "binary",
+        "metric":            ["auc", "binary_logloss"],
+        "scale_pos_weight":  n_neg / max(n_pos, 1),
+        "learning_rate":     0.05,
+        "num_leaves":        31,
         "min_child_samples": 20,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq":     5,
-        "verbose":          -1,
-        "seed":             42,
+        "feature_fraction":  0.8,
+        "bagging_fraction":  0.8,
+        "bagging_freq":      5,
+        "verbose":           -1,
+        "seed":              42,
     }
+    if extra_params:
+        params.update(extra_params)
 
-    print("\nEntraînement LightGBM...")
-    callbacks = [lgb.early_stopping(50, verbose=False), lgb.log_evaluation(100)]
-    model = lgb.train(
-        params, dtrain,
-        num_boost_round=1000,
-        valid_sets=[dtrain, dval],
-        valid_names=["train", "val"],
-        callbacks=callbacks,
-    )
+    mlflow.set_experiment("fraudnet-baseline")
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_params({
+            "learning_rate":     params["learning_rate"],
+            "num_leaves":        params["num_leaves"],
+            "min_child_samples": params["min_child_samples"],
+            "feature_fraction":  params["feature_fraction"],
+            "bagging_fraction":  params["bagging_fraction"],
+            "n_train":           len(X_train),
+            "n_test":            len(X_test),
+            "fraud_rate_train":  round(n_pos / len(y_train), 4),
+        })
 
-    model_path.parent.mkdir(exist_ok=True)
-    with open(model_path, "wb") as f:
-        pickle.dump({"model": model, "feature_cols": FEATURE_COLS}, f)
-    print(f"\n✓ Modèle sauvegardé → {model_path}")
+        print("\nEntraînement LightGBM...")
+        callbacks = [lgb.early_stopping(50, verbose=False), lgb.log_evaluation(100)]
+        model = lgb.train(
+            params, dtrain,
+            num_boost_round=1000,
+            valid_sets=[dtrain, dval],
+            valid_names=["train", "val"],
+            callbacks=callbacks,
+        )
+
+        mlflow.log_metric("best_iteration", model.best_iteration)
+        mlflow.log_metric("auc_val", model.best_score["val"]["auc"])
+        mlflow.log_metric("logloss_val", model.best_score["val"]["binary_logloss"])
+
+        model_path.parent.mkdir(exist_ok=True)
+        with open(model_path, "wb") as f:
+            pickle.dump({"model": model, "feature_cols": FEATURE_COLS}, f)
+        mlflow.log_artifact(str(model_path))
+        print(f"\n✓ Modèle sauvegardé → {model_path}")
+
     return model
 
 
