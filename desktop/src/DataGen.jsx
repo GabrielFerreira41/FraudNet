@@ -13,15 +13,23 @@ const ARCH_META = {
 };
 
 const FRAUD_META = {
-  carte_volee:     { label: "Carte volée",     color: "#be1f26" },
-  test_carte:      { label: "Test de carte",   color: "#c86020" },
-  prise_de_compte: { label: "Prise de compte", color: "#d4760a" },
-  reseau_mules:    { label: "Réseau de mules", color: "#8b1a1a" },
-  structuration:   { label: "Structuration",   color: "#6b3fa0" },
+  carte_volee:      { label: "Carte volée",       color: "#be1f26", desc: "Achats inhabituels après vol physique de carte" },
+  test_carte:       { label: "Test de carte",     color: "#c86020", desc: "Micro-transactions pour valider la carte avant gros achat" },
+  prise_de_compte:  { label: "Prise de compte",   color: "#d4760a", desc: "Nouveau device → virement massif immédiat" },
+  reseau_mules:     { label: "Réseau de mules",   color: "#8b1a1a", desc: "Virements coordonnés entre comptes complices" },
+  structuration:    { label: "Structuration",      color: "#6b3fa0", desc: "Fractionnement sous le seuil CANAFE (9 500 $)" },
+  sim_swap:         { label: "SIM Swap",           color: "#0369a1", desc: "Détournement du numéro → contournement 2FA" },
+  phishing:         { label: "Hameçonnage",        color: "#0f766e", desc: "Credentials volés → test puis vidage de compte" },
+  fraude_aines:     { label: "Arnaque aînés",      color: "#b45309", desc: "Manipulation téléphonique → cartes-cadeaux (retraités)" },
+  skimming:         { label: "Écrémage GAB",       color: "#4338ca", desc: "Carte clonée → retraits rapides dans une autre ville" },
+  fraude_ecommerce: { label: "Fraude e-commerce",  color: "#be185d", desc: "Numéro de carte volé → achats en ligne multiples (CNP)" },
 };
 
-const DEFAULT_ARCH = { etudiant: 20, jeune_actif: 25, famille: 25, entreprise: 20, retraite: 10 };
-const DEFAULT_FRAUD = { carte_volee: 30, test_carte: 25, prise_de_compte: 20, reseau_mules: 15, structuration: 10 };
+const DEFAULT_ARCH  = { etudiant: 20, jeune_actif: 25, famille: 25, entreprise: 20, retraite: 10 };
+const DEFAULT_FRAUD = {
+  carte_volee: 15, test_carte: 14, prise_de_compte: 10, reseau_mules: 8, structuration: 8,
+  sim_swap: 13, phishing: 13, fraude_aines: 7, skimming: 8, fraude_ecommerce: 4,
+};
 
 function fmtNum(n) { return n?.toLocaleString("fr-CA") ?? "—"; }
 function fmtSec(n) { return n < 60 ? `${n} s` : `${Math.ceil(n/60)} min`; }

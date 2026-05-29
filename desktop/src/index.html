@@ -22,9 +22,7 @@
 <script type="text/babel" src="GraphView.jsx"></script>
 <script type="text/babel" src="LiveOps.jsx"></script>
 <script type="text/babel" src="DataGen.jsx"></script>
-<!-- Future views (uncomment when ready):
 <script type="text/babel" src="ModelStats.jsx"></script>
--->
 
 <script type="text/babel">
 const { useState, useEffect } = React;
@@ -35,7 +33,7 @@ const VIEWS = [
   { id: "graph",     label: "Réseau Neo4j",  ready: true  },
   { id: "live",      label: "MARS Analyzer", ready: true  },
   { id: "datagen",   label: "Générateur",    ready: true  },
-  { id: "model",     label: "Performance",   ready: false },
+  { id: "model",     label: "Performance",   ready: true  },
 ];
 
 function ApiPill() {
@@ -103,13 +101,14 @@ function App() {
         {view === "graph"     && <GraphView/>}
         {view === "live"      && <LiveOps/>}
         {view === "datagen"   && <DataGen/>}
+        {view === "model"     && <ModelStats/>}
       </div>
     </div>
   );
 }
 
 function mount() {
-  if (!window.PitchView || !window.Dashboard || !window.GraphView || !window.LiveOps || !window.DataGen) {
+  if (!window.PitchView || !window.Dashboard || !window.GraphView || !window.LiveOps || !window.DataGen || !window.ModelStats) {
     setTimeout(mount, 30); return;
   }
   ReactDOM.createRoot(document.getElementById("root")).render(<App/>);

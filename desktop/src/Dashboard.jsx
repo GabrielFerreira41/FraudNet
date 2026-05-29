@@ -932,21 +932,30 @@ function CategoryChart({ data, onTip }) {
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 function Dashboard() {
-  const [stats, setStats]         = useStateD(null);
-  const [loading, setLoading]     = useStateD(true);
-  const [archetype, setArchetype] = useStateD("all");
-  const [province, setProvince]   = useStateD("all");
-  const [fraudType, setFraudType] = useStateD("all");
-  const [tip, setTip]             = useStateD(null);
+  const [stats, setStats]               = useStateD(null);
+  const [loading, setLoading]           = useStateD(true);
+  const [archetype, setArchetype]       = useStateD("all");
+  const [province, setProvince]         = useStateD("all");
+  const [fraudType, setFraudType]       = useStateD("all");
+  const [datasets, setDatasets]         = useStateD([]);
+  const [selectedDataset, setSelectedDataset] = useStateD("main");
+  const [tip, setTip]                   = useStateD(null);
+
+  useEffectD(() => {
+    fetch(`${API}/generate/datasets`)
+      .then(r => r.json())
+      .then(setDatasets)
+      .catch(() => {});
+  }, []);
 
   useEffectD(() => {
     setLoading(true);
-    const p = new URLSearchParams({ archetype, province, fraud_type: fraudType });
+    const p = new URLSearchParams({ archetype, province, fraud_type: fraudType, dataset: selectedDataset });
     fetch(`${API}/stats/dataset?${p}`)
       .then(r => r.json())
       .then(d => { setStats(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [archetype, province, fraudType]);
+  }, [archetype, province, fraudType, selectedDataset]);
 
   const selStyle = {
     background:"var(--card)", border:"1px solid var(--border)",
@@ -954,7 +963,7 @@ function Dashboard() {
     fontFamily:"var(--font)", cursor:"pointer", outline:"none", borderRadius:4,
   };
 
-  const isFiltered = archetype !== "all" || province !== "all" || fraudType !== "all";
+  const isFiltered = archetype !== "all" || province !== "all" || fraudType !== "all" || selectedDataset !== "main";
   const kpis = stats?.kpis;
 
   return (
@@ -968,6 +977,18 @@ function Dashboard() {
       }}>
         <span style={{ fontSize:9, letterSpacing:"0.18em", textTransform:"uppercase",
           color:"var(--ink-3)", fontWeight:600, marginRight:4 }}>Vue Données</span>
+
+        {datasets.length > 1 && (
+          <select value={selectedDataset} onChange={e => setSelectedDataset(e.target.value)}
+            style={{ ...selStyle, fontWeight: 600, borderColor: selectedDataset !== "main" ? "var(--navy)" : "var(--border)" }}>
+            {datasets.map(ds => (
+              <option key={ds.id} value={ds.id}>
+                {ds.is_main ? "Dataset principal" : ds.name}
+                {ds.stats?.n_transactions ? ` (${ds.stats.n_transactions.toLocaleString("fr-CA")} tx)` : ""}
+              </option>
+            ))}
+          </select>
+        )}
 
         <select value={archetype} onChange={e => setArchetype(e.target.value)} style={selStyle}>
           <option value="all">Tous les profils</option>
@@ -985,7 +1006,7 @@ function Dashboard() {
         </select>
 
         {isFiltered && (
-          <button onClick={() => { setArchetype("all"); setProvince("all"); setFraudType("all"); }}
+          <button onClick={() => { setArchetype("all"); setProvince("all"); setFraudType("all"); setSelectedDataset("main"); }}
             style={{ ...selStyle, color:"#be1f26", borderColor:"rgba(190,31,38,.3)" }}>
             × Réinitialiser
           </button>
